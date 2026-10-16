@@ -1,0 +1,29 @@
+{
+  "ingest": {
+    "trackMaxAgeSec": 21600,
+    "maxTrackedTokens": 2000,
+    "dexscreenerRefreshSec": 20,
+    "dexscreenerReqPerMin": 250,
+    "geckoPollSec": 30,
+    "geckoReqPerMin": 8,
+    "trendingPollSec": 60,
+    "bondingCurveRefreshSec": 15,
+    "holdersRefreshSec": 120,
+    "holderCountMaxPages": 5,
+    "holdersPerCycle": 10,
+    "curveFromTradeThrottleMs": 5000,
+    "tradeRetentionHours": 48,
+    "rpcReqPerSec": 8,
+    "dasReqPerSec": 1.5,
+    "poolTxFetchDelayMs": 1500,
+    "venues": ["pumpfun", "pumpswap", "raydium_cpmm", "raydium_launchlab", "meteora_damm_v2", "meteora_dbc"]
+  },
+  "social": {
+    "subreddits": ["solana", "CryptoMoonShots", "SolanaMemeCoins"],
+    "redditPollSec": 60,
+    "xPollSec": 120,
+    "xMaxReadsPerDay": 2000,
+    "velocityWindowsSec": [300, 3600]
+  },
+  "programs": {}
+}

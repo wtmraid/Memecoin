@@ -1,0 +1,47 @@
+[
+  {
+    "chainId": "solana",
+    "dexId": "pumpswap",
+    "url": "https://dexscreener.com/solana/pairaaaa",
+    "pairAddress": "8sLbNZoA1cfnvMJLPfp98ZLAnFSYCFApfJKMbiXNLwxj",
+    "baseToken": { "address": "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr", "name": "Example", "symbol": "EXMPL" },
+    "quoteToken": { "address": "So11111111111111111111111111111111111111112", "name": "Wrapped SOL", "symbol": "SOL" },
+    "priceNative": "0.00000061",
+    "priceUsd": "0.000123",
+    "txns": {
+      "m5": { "buys": 40, "sells": 12 },
+      "h1": { "buys": 310, "sells": 150 },
+      "h6": { "buys": 900, "sells": 400 },
+      "h24": { "buys": 900, "sells": 400 }
+    },
+    "volume": { "m5": 5200.1, "h1": 61000, "h6": 150000, "h24": 150000 },
+    "priceChange": { "m5": 4.2, "h1": 35.1, "h6": 120, "h24": 120 },
+    "liquidity": { "usd": 45210.5, "base": 183000000, "quote": 112.4 },
+    "fdv": 123000,
+    "marketCap": 123000,
+    "pairCreatedAt": 1760000000000,
+    "info": {
+      "imageUrl": "https://example.com/i.png",
+      "websites": [{ "label": "Website", "url": "https://example.com" }],
+      "socials": [{ "type": "twitter", "url": "https://x.com/example" }]
+    }
+  },
+  {
+    "chainId": "solana",
+    "dexId": "raydium",
+    "pairAddress": "3nMFwZXwY1s1M5s8vYAHqd4wGs4iSxXE4LRoUMMYqEgF",
+    "baseToken": { "address": "7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr", "symbol": "EXMPL" },
+    "quoteToken": { "address": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "symbol": "USDC" },
+    "priceUsd": "0.000122",
+    "liquidity": { "usd": 800 },
+    "pairCreatedAt": 1760000100000
+  },
+  {
+    "chainId": "solana",
+    "dexId": "raydium",
+    "pairAddress": "Ff2bC7s8r9mGgPKyPp4Vfe8W9tMDEsoQnoTYZv5eaQjq",
+    "baseToken": { "address": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", "symbol": "OTHER" },
+    "priceUsd": "0.00002",
+    "liquidity": { "usd": 999999 }
+  }
+]

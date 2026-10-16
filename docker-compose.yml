@@ -1,0 +1,25 @@
+services:
+  scanner:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_PATH: /app/data/scanner.db
+    volumes:
+      - scanner-data:/app/data
+      - ./config:/app/config:ro
+    mem_limit: 768m
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+    healthcheck:
+      # Healthy if the DB was written to in the last 5 minutes.
+      test: ["CMD", "node", "-e", "const s=require('fs').statSync('/app/data/scanner.db-wal');process.exit(Date.now()-s.mtimeMs<300000?0:1)"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+  # Phase 3 adds: dashboard (Next.js) reading the same volume.
+
+volumes:
+  scanner-data:
