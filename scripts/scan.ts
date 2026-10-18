@@ -16,6 +16,8 @@ import { TokenRegistry } from '../src/pipeline/registry.js';
 import { GmgnClient } from '../src/safety/gmgn.js';
 import { JupiterSellSim } from '../src/safety/jupiter.js';
 import { fetchMintInfo } from '../src/safety/mintInfo.js';
+import { makeClusterAnalyzer } from '../src/safety/clusters.js';
+import { fetchHolderStats } from '../src/ingest/onchain/holders.js';
 import { RugcheckClient } from '../src/safety/rugcheck.js';
 import { Evaluator } from '../src/strategy/evaluator.js';
 import { formatScan, toPlain } from '../src/alerts/format.js';
@@ -47,6 +49,13 @@ const ev = new Evaluator(
     rugcheck: env.ENABLE_RUGCHECK ? new RugcheckClient(http(1)) : undefined,
     sellSim: new JupiterSellSim(http(env.JUPITER_API_KEY ? 0.9 : 0.45), env.JUPITER_API_KEY),
     marketSnapshots: (m) => ds.snapshots(m),
+    clusters: rpc
+      ? makeClusterAnalyzer(rpc, (m) => fetchHolderStats(rpc, m, { maxPages: 1, useDas: false }), {
+          maxHolders: settings.filters.clusterMaxHolders,
+          freshMaxTx: settings.filters.freshMaxTx,
+          hubMinTxPerDay: settings.filters.hubMinTxPerDay,
+        })
+      : undefined,
   },
   { filters: settings.filters, scoring: settings.scoring, strategy: settings.strategy },
 );

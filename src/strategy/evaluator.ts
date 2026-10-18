@@ -17,6 +17,7 @@ import { scoreToken } from '../scoring/score.js';
 import { buildPlan, decideMode } from './plan.js';
 import type { Evaluation, Signal } from './types.js';
 import { WSOL_MINT } from '../ingest/onchain/programs.js';
+import type { ClusterReport } from '../safety/clusters.js';
 
 export interface DeepData {
   gmgn?: GmgnFacts | null;
@@ -24,6 +25,7 @@ export interface DeepData {
   rugcheck?: RugcheckSummary | null;
   sellSim?: SellSimResult | null;
   devHistory?: { launches: number; migrated: number; gradRate: number | null } | null;
+  clusters?: ClusterReport | null;
 }
 
 export interface EvaluatorDeps {
@@ -36,6 +38,10 @@ export interface EvaluatorDeps {
   mintInfo?: (mint: string) => Promise<MintInfo | null>;
   rugcheck?: RugcheckClient;
   sellSim?: JupiterSellSim;
+  /** Bubblemaps-style holder clustering (funding links between top holders). */
+  clusters?: (mint: string, creator: string | null) => Promise<ClusterReport | null>;
+  /** Random source for shadow sampling (injectable for tests). */
+  random?: () => number;
   /** Used by forced scans of tokens we aren't tracking yet. */
   marketSnapshots?: (mints: string[]) => Promise<Map<string, import('../core/types.js').MarketSnapshot>>;
   now?: () => number;
@@ -69,13 +75,16 @@ export class Evaluator {
   private deepCache: TtlCache<DeepData>;
   private devCache = new TtlCache<DeepData['devHistory']>(3600_000);
   private simCache: TtlCache<SellSimResult | null>;
+  private clusterCache = new TtlCache<ClusterReport | null>(120_000);
+  private prewarmed = new Map<string, number>();
+  private shadowed = new Set<string>();
   private signaled = new Map<string, number>();
   private rejectedUntil = new Map<string, number>();
   private permanent = new Set<string>();
   private inflight = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
   private now: () => number;
-  stats = { ticks: 0, candidates: 0, deepChecks: 0, rejected: 0, signals: 0 };
+  stats = { ticks: 0, candidates: 0, deepChecks: 0, prewarms: 0, rejected: 0, signals: 0, shadows: 0 };
 
   constructor(
     private d: EvaluatorDeps,
@@ -225,6 +234,15 @@ export class Evaluator {
       if (f.devMigrated === null) f.devMigrated = deep.devHistory.migrated;
     }
     if (f.creator) f.creatorLaunches24h = this.creatorLaunches.count(f.creator, now);
+    if (deep.clusters) {
+      f.coverage.clusters = true;
+      f.clusterPct = deep.clusters.largestClusterPct;
+      f.devLinkedPct = deep.clusters.devLinkedPct;
+      f.clusters = deep.clusters.clusters.slice(0, 3).map((c) => ({ pct: c.pct, wallets: c.owners.length, includesDev: c.includesDev }));
+      f.sources.clusterPct = 'onchain';
+    }
+    if (g?.freshWalletPct !== null && g?.freshWalletPct !== undefined) set('freshWalletPct', g.freshWalletPct, 'gmgn');
+    else if (deep.clusters && deep.clusters.analyzed >= 5) set('freshWalletPct', deep.clusters.freshHolderPct, 'onchain');
 
     f.lp.applies = !f.onCurve;
     if (deep.rugcheck) {
@@ -281,6 +299,10 @@ export class Evaluator {
       out.devHistory = await this.devCache
         .get(creator, () => this.d.gmgn!.devHistory(creator))
         .catch((e) => (this.warn('devHistory', mint, e), null));
+    }
+    if (this.d.clusters && out.clusters === undefined) {
+      const cl = this.d.clusters;
+      out.clusters = await this.clusterCache.get(mint, () => cl(mint, creator ?? null).catch((e) => (this.warn('clusters', mint, e), null)));
     }
     if (withSellSim && this.d.sellSim && !out.sellSim) {
       const sim = this.d.sellSim;
@@ -356,6 +378,7 @@ export class Evaluator {
     this.stats.ticks++;
     const now = this.now();
     const cands: string[] = [];
+    const prewarm: string[] = [];
     for (const t of this.d.registry.prioritized()) {
       if (now - t.lastActivity > 10 * 60_000) break; // prioritized = most recent first
       const m = t.mint;
@@ -365,7 +388,10 @@ export class Evaluator {
       if (last !== undefined && now - last < this.s.strategy.scalp.cooldownSec * 1000) continue;
 
       const cheap = this.judge(this.buildFacts(m), { cheapOnly: true });
-      if (!cheap.mode) continue;
+      if (!cheap.mode) {
+        if (this.shouldPrewarm(cheap, now)) prewarm.push(m);
+        continue;
+      }
       if (!cheap.filters.passed) {
         this.reject(m, cheap.filters.failures.map((x) => x.id), now);
         continue;
@@ -377,6 +403,36 @@ export class Evaluator {
     this.stats.candidates += cands.length;
     const slots = Math.max(0, this.s.strategy.deepCheckConcurrency - this.inflight.size);
     for (const m of cands.slice(0, slots)) void this.deepAndSignal(m);
+    // Spare capacity: start deep checks on launches that are building up, so when one
+    // qualifies its safety data is already cached and the alert goes out immediately.
+    const spare = Math.max(0, this.s.strategy.deepCheckConcurrency + this.s.strategy.prewarmConcurrency - this.inflight.size - Math.min(cands.length, slots));
+    for (const m of prewarm.slice(0, spare)) void this.prewarm(m);
+  }
+
+  private shouldPrewarm(e: Evaluation, now: number): boolean {
+    const f = e.facts;
+    const s = this.s.strategy;
+    // "Not mature yet" failures (age, holders, curve size) are exactly what pre-warming waits out.
+    if (e.filters.failures.some((x) => !TRANSIENT.has(x.id))) return false;
+    if (f.ageSec === null || f.ageSec > s.snipe.maxAgeSec || f.ageSec < s.prewarmMinAgeSec) return false;
+    if ((f.momentum.uniqueBuyersTotal ?? 0) < s.prewarmMinBuyers) return false;
+    const last = this.prewarmed.get(e.mint);
+    return last === undefined || now - last > s.deepCheckTtlSec * 1000;
+  }
+
+  private async prewarm(mint: string) {
+    this.inflight.add(mint);
+    this.prewarmed.set(mint, this.now());
+    this.stats.prewarms++;
+    try {
+      const deep = await this.deepCache.get(mint, () => this.loadDeep(mint, false));
+      const pre = runFilters(this.withSellSimPlaceholder(this.buildFacts(mint, deep)), this.s.filters);
+      if (pre.passed) await this.loadDeep(mint, true, deep); // warms the sell-test cache too
+    } catch (err) {
+      this.warn('prewarm', mint, err);
+    } finally {
+      this.inflight.delete(mint);
+    }
   }
 
   private reject(mint: string, ids: string[], now: number) {
@@ -391,11 +447,21 @@ export class Evaluator {
     try {
       const ev = await this.evaluate(mint, { deep: true });
       if (!ev.filters.passed) {
-        this.reject(mint, ev.filters.failures.map((x) => x.id), this.now());
+        const ids = ev.filters.failures.map((x) => x.id);
+        this.reject(mint, ids, this.now());
         this.d.log.info({ mint, sym: ev.facts.symbol, why: ev.filters.failures.map((x) => x.reason) }, 'rejected');
+        // Follow a sample of rejects silently: tells the tuner which filters actually save money.
+        if (!ids.every((id) => TRANSIENT.has(id)) && (this.d.random ?? Math.random)() < this.s.strategy.shadowRejectSampleRate) this.shadow(ev, ids);
         return;
       }
-      if (!ev.actionable || !ev.mode || !ev.plan) return;
+      if (!ev.actionable) {
+        const minScore = ev.mode === 'SCALP' ? this.s.scoring.minScoreScalp : this.s.scoring.minScoreSnipe;
+        // Near-miss: safe, qualified, but scored a bit low. Track it silently so the tuner
+        // can tell whether the score bar is set too high or too low.
+        if (ev.mode && ev.score.score >= minScore - this.s.strategy.shadowScoreBelow) this.shadow(ev, []);
+        return;
+      }
+      if (!ev.mode || !ev.plan) return;
       const signal: Signal = { ...ev, mode: ev.mode, plan: ev.plan, id: randomUUID(), ts: this.now() };
       this.signaled.set(mint, signal.ts);
       this.stats.signals++;
@@ -405,6 +471,13 @@ export class Evaluator {
     } finally {
       this.inflight.delete(mint);
     }
+  }
+
+  private shadow(ev: Evaluation, rejectIds: string[]) {
+    if (!ev.mode || !ev.plan || this.shadowed.has(ev.mint)) return;
+    this.shadowed.add(ev.mint);
+    this.stats.shadows++;
+    this.d.bus.emit('signal.shadow', { ...ev, mode: ev.mode, plan: ev.plan, id: randomUUID(), ts: this.now(), shadow: true, rejectIds });
   }
 
   start() {

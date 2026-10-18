@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS signals (
   max_multiple REAL, max_drawdown_pct REAL, rugged INTEGER, paper_pnl_pct REAL, closed_ms INTEGER, outcome_ms INTEGER
 );
 CREATE INDEX IF NOT EXISTS signals_ts ON signals(ts_ms);
+CREATE TABLE IF NOT EXISTS signal_prices (
+  signal_id TEXT NOT NULL, ts_ms INTEGER NOT NULL, price_sol REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS signal_prices_id ON signal_prices(signal_id, ts_ms);
 CREATE TABLE IF NOT EXISTS signal_updates (
   signal_id TEXT NOT NULL, ts_ms INTEGER NOT NULL, kind TEXT NOT NULL, sell_pct REAL, remaining_pct REAL,
   price_sol REAL, multiple REAL, pnl_pct REAL, reason TEXT
@@ -94,6 +98,7 @@ export class Store {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('synchronous = NORMAL');
     this.db.exec(SCHEMA);
+    this.migrate();
     const p = (sql: string) => this.db.prepare(sql);
     this.stmts = {
       upsertToken: p(`INSERT INTO tokens (mint,name,symbol,uri,creator,bonding_curve,venue,first_seen_ms,created_ms,created_sig,discovered_via)
@@ -114,10 +119,11 @@ export class Store {
       mention: p(`INSERT OR IGNORE INTO mentions VALUES (?,?,?,?,?,?,?,?,?,?)`),
       wallet: p(`INSERT OR IGNORE INTO wallet_trades VALUES (?,?,?,?,?,?,?,?)`),
       getToken: p(`SELECT * FROM tokens WHERE mint=?`),
-      signal: p(`INSERT OR IGNORE INTO signals (id,mint,symbol,mode,score,coverage,ts_ms,entry_price_sol,entry_mcap_usd,age_sec,curve_progress,features_json,facts_json,filters_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+      signal: p(`INSERT OR IGNORE INTO signals (id,mint,symbol,mode,score,coverage,ts_ms,entry_price_sol,entry_mcap_usd,age_sec,curve_progress,features_json,facts_json,filters_json,shadow,reject_ids,max_entry_price_sol)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+      price: p(`INSERT INTO signal_prices VALUES (?,?,?)`),
       update: p(`INSERT INTO signal_updates VALUES (?,?,?,?,?,?,?,?,?)`),
-      outcome: p(`UPDATE signals SET p1m=?,p5m=?,p15m=?,p1h=?,p24h=?,max_multiple=?,max_drawdown_pct=?,rugged=?,paper_pnl_pct=?,closed_ms=?,outcome_ms=? WHERE id=?`),
+      outcome: p(`UPDATE signals SET p1m=?,p5m=?,p15m=?,p1h=?,p24h=?,max_multiple=?,max_drawdown_pct=?,rugged=?,paper_pnl_pct=?,closed_ms=?,outcome_ms=?,emergency_ms=?,emergency_reason=? WHERE id=?`),
     };
   }
 
@@ -176,13 +182,31 @@ export class Store {
   insertWalletTrade(t: WalletTrade) {
     this.stmts.wallet.run(t.signature, t.wallet, t.mint, t.side, big(t.tokenDelta), big(t.solDeltaLamports), t.slot, t.ts);
   }
+  /** Additive column migrations for databases created by older versions. */
+  private migrate() {
+    const cols = new Set((this.db.prepare('PRAGMA table_info(signals)').all() as { name: string }[]).map((c) => c.name));
+    const add: [string, string][] = [
+      ['shadow', 'INTEGER DEFAULT 0'],
+      ['reject_ids', 'TEXT'],
+      ['emergency_ms', 'INTEGER'],
+      ['emergency_reason', 'TEXT'],
+      ['max_entry_price_sol', 'REAL'],
+    ];
+    for (const [name, type] of add) if (!cols.has(name)) this.db.exec(`ALTER TABLE signals ADD COLUMN ${name} ${type}`);
+  }
+
   insertSignal(s: Signal) {
     const replacer = (_k: string, v: unknown) => (typeof v === 'bigint' ? v.toString() : v);
     this.stmts.signal.run(
       s.id, s.mint, s.facts.symbol ?? null, s.mode, s.score.score, s.score.coverage, s.ts, s.plan.entryPrice,
       s.facts.mcapUsd, s.facts.ageSec, s.facts.curveProgress, JSON.stringify(s.score.features),
       JSON.stringify(s.facts, replacer), JSON.stringify(s.filters.results),
+      s.shadow ? 1 : 0, s.rejectIds?.length ? JSON.stringify(s.rejectIds) : null, s.plan.maxEntryPrice,
     );
+  }
+  insertSignalPrices(rows: { id: string; ts: number; price: number }[]) {
+    if (!rows.length) return;
+    this.db.transaction(() => rows.forEach((r) => this.stmts.price.run(r.id, r.ts, r.price)))();
   }
   insertSignalUpdate(u: SignalUpdate) {
     this.stmts.update.run(u.signalId, u.ts, u.kind, u.sellPct, u.remainingPct, u.price, u.multiple, u.pnlPct, u.reason);
@@ -191,7 +215,7 @@ export class Store {
     const c = o.checkpoints;
     this.stmts.outcome.run(
       c[1] ?? null, c[5] ?? null, c[15] ?? null, c[60] ?? null, c[1440] ?? null,
-      o.maxMultiple, o.maxDrawdownPct, o.rugged ? 1 : 0, o.pnlPct, o.closedTs, ts, o.signalId,
+      o.maxMultiple, o.maxDrawdownPct, o.rugged ? 1 : 0, o.pnlPct, o.closedTs, ts, o.emergencyTs, o.emergencyReason, o.signalId,
     );
   }
   getToken(mint: string): Record<string, unknown> | undefined {

@@ -39,6 +39,11 @@ export interface TokenFacts {
   devLaunches: number | null;
   devGradRate: number | null;
   rugRatio: number | null;
+  /** Bubblemaps-style cluster analysis of top holders. */
+  clusterPct: number | null;
+  devLinkedPct: number | null;
+  freshWalletPct: number | null;
+  clusters: { pct: number; wallets: number; includesDev: boolean }[];
   sources: Partial<Record<string, Source>>;
 
   creator: string | null;
@@ -88,7 +93,7 @@ export interface TokenFacts {
     acceleration: number;
   };
   /** Which data sources were available for this evaluation. */
-  coverage: { gmgn: boolean; onchainBook: boolean; rpc: boolean; market: boolean; sellSim: boolean; rugcheck: boolean };
+  coverage: { gmgn: boolean; onchainBook: boolean; rpc: boolean; market: boolean; sellSim: boolean; rugcheck: boolean; clusters: boolean };
 }
 
 export function emptyFacts(mint: string, now: number): TokenFacts {
@@ -118,6 +123,10 @@ export function emptyFacts(mint: string, now: number): TokenFacts {
     devLaunches: null,
     devGradRate: null,
     rugRatio: null,
+    clusterPct: null,
+    devLinkedPct: null,
+    freshWalletPct: null,
+    clusters: [],
     sources: {},
     creator: null,
     creatorStatus: null,
@@ -151,6 +160,6 @@ export function emptyFacts(mint: string, now: number): TokenFacts {
     },
     smartMoney: { gmgnSmart: null, gmgnRenowned: null, watchedWalletBuys: 0 },
     social: { mentions1h: 0, mentions5m: 0, kolMentions1h: 0, uniqueAuthors1h: 0, negativeMentions1h: 0, acceleration: 0 },
-    coverage: { gmgn: false, onchainBook: false, rpc: false, market: false, sellSim: false, rugcheck: false },
+    coverage: { gmgn: false, onchainBook: false, rpc: false, market: false, sellSim: false, rugcheck: false, clusters: false },
   };
 }

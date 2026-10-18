@@ -34,7 +34,10 @@ export class AlertService {
       const html = formatSignal(s);
       void this.post(html, s.mint).then((id) => id && this.threads.set(s.id, id));
     });
-    bus.on('signal.update', (u) => void this.post(formatUpdate(u), u.mint, this.threads.get(u.signalId)));
+    bus.on('signal.update', (u) => {
+      if (u.shadow) return; // learning-only tracking, never sent
+      void this.post(formatUpdate(u), u.mint, this.threads.get(u.signalId));
+    });
   }
 
   private async post(html: string, mint: string, replyTo?: number): Promise<number | null> {

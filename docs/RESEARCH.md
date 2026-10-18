@@ -57,6 +57,19 @@ on it. `npm run smoke` (Phase 1) does exactly that from your own machine/VPS.
   `open_count` (graduated), `tokens[]` (≤ ~101 newest).
 - Token page link: `https://gmgn.ai/sol/token/<mint>` (also returned as `link.gmgn`).
 
+### Wallet clusters (Bubblemaps-style) — added 2026-10-18
+- **Bubblemaps** has a B2B Data API (bubble maps, top holders, clusters, scores) with an API key
+  in an `X-ApiKey` header, issued after sign-up; its docs call it an early version and endpoint
+  paths/pricing aren't public. Not integrated — we don't ship guessed API shapes.
+  (docs.bubblemaps.io/data/api/introduction, /authentication)
+- **Helius Wallet API** `GET /v1/wallet/{wallet}/funded-by` returns the first funder, but costs
+  100 credits/call, is beta, and **refuses Free-plan keys** (helius.dev/docs/wallet-api/funded-by).
+- **What we do instead (free):** standard RPC `getSignaturesForAddress` (walk to the wallet's
+  oldest tx, ≤2 pages) + `getTransaction` on it; the account whose SOL went into the wallet is
+  its funder. Union-find over holder↔funder links gives clusters. Program-owned holders
+  (off-curve PDAs: bonding curve, AMM vaults, lockers) are excluded; funders with ≥1000 tx/day
+  are treated as exchanges and not used as links. Per-wallet results are cached.
+
 ### On-chain streaming: Helius standard WebSockets
 - Helius plans changed **2026-04-07**: Free $0 (1M credits), Developer $49 (10M),
   Business $499 (100M), Professional $999 (200M).
@@ -194,6 +207,7 @@ All IDs live in `src/ingest/onchain/programs.ts` and can be overridden in config
   tip-floor percentile, not the minimum.
 
 ## Sources
+- Bubblemaps API: https://docs.bubblemaps.io/data/api/introduction · https://docs.bubblemaps.io/data/api/authentication · Helius funded-by: https://www.helius.dev/docs/wallet-api/funded-by
 - GMGN: https://github.com/GMGNAI/gmgn-skills (skills/gmgn-token/SKILL.md, docs/cli-usage.md) · npm `gmgn-cli` 1.6.7 · https://gmgn.ai/ai
 - Helius plans: https://www.helius.dev/docs/billing/plans · rate limits: https://www.helius.dev/docs/billing/rate-limits · logsSubscribe: https://www.helius.dev/docs/api-reference/rpc/websocket/logssubscribe.md · transactionSubscribe: https://www.helius.dev/docs/rpc/websocket/transaction-subscribe
 - DexScreener (community docs): https://github.com/opensvm/dexscreener-mcp-server · https://claudeskills.info/skills/agiprolabs/claude-trading-skills/dexscreener-api/

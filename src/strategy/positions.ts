@@ -8,7 +8,7 @@ import { PaperPosition } from '../backtest/paper.js';
 import type { MarketSnapshot } from '../core/types.js';
 import { WSOL_MINT } from '../ingest/onchain/programs.js';
 import type { TokenRegistry } from '../pipeline/registry.js';
-import { applyExits, evaluateExits, type Observation, type PositionState } from './exits.js';
+import { applyExits, checkEmergency, evaluateExits, type Observation, type PositionState } from './exits.js';
 import type { Signal, SignalUpdate } from './types.js';
 
 export interface ClosedOutcome {
@@ -18,8 +18,12 @@ export interface ClosedOutcome {
   maxMultiple: number;
   maxDrawdownPct: number;
   rugged: boolean;
-  pnlPct: number;
+  /** null = no trade (entry window missed). */
+  pnlPct: number | null;
   closedTs: number | null;
+  /** First time a rug-in-progress condition appeared (even after the position closed). */
+  emergencyTs: number | null;
+  emergencyReason: string | null;
 }
 
 interface Pos {
@@ -31,20 +35,25 @@ interface Pos {
   bundle: string[];
   /** Waiting for the simulated reaction latency before the paper entry fills. */
   pendingEntryUntil: number;
+  missed: boolean;
   closedTs: number | null;
   migrated: boolean;
   lastPrice: number;
   lastObsTs: number;
+  lastPathTs: number;
+  emergency: { ts: number; reason: string } | null;
 }
 
 /**
- * Follows every signal: paper-trades it with the exit rules and sends sell
- * recommendations (`signal.update`) as they trigger. Keeps tracking after the paper
- * position is closed until the last outcome checkpoint (24h) so the logged outcome is
- * complete — that's the dataset `npm run report` and the tuner learn from.
+ * Follows every signal (and, silently, every shadow signal): paper-trades it with the
+ * exit rules and sends sell recommendations (`signal.update`) as they trigger. Keeps
+ * tracking after the paper position closes until the last outcome checkpoint (24h),
+ * recording the price path and the first rug-warning — that's what `npm run tune` replays.
  */
 export class PositionMonitor {
-  readonly positions = new Map<string, Pos>(); // by mint
+  /** By signal id. */
+  readonly positions = new Map<string, Pos>();
+  private byMint = new Map<string, Set<string>>();
   private timer: NodeJS.Timeout | null = null;
 
   constructor(
@@ -58,27 +67,31 @@ export class PositionMonitor {
     private hooks: {
       refreshMarket?: (mints: string[]) => Promise<Map<string, MarketSnapshot>>;
       onOutcome?: (o: ClosedOutcome) => void;
+      /** Price path sample (≤ every 5 s for the first hour, then every 60 s). */
+      onPrice?: (signalId: string, ts: number, price: number) => void;
     } = {},
     private now: () => number = Date.now,
   ) {
     bus.on('signal.buy', (sig) => this.open(sig));
+    bus.on('signal.shadow', (sig) => this.open(sig));
     bus.on('pumpfun.trade', (t) => {
-      const p = this.positions.get(t.mint);
-      if (p && !p.migrated) this.observe(p, this.books.get(t.mint)?.lastPriceSol ?? 0);
+      for (const p of this.forMint(t.mint)) if (!p.migrated) this.observe(p, this.books.get(t.mint)?.lastPriceSol ?? 0);
     });
     bus.on('market.snapshot', (m) => {
-      const p = this.positions.get(m.mint);
-      if (p && (p.migrated || !this.books.get(m.mint)?.lastPriceSol)) this.observe(p, this.priceFromSnapshot(m) ?? 0, m);
+      for (const p of this.forMint(m.mint)) if (p.migrated || !this.books.get(m.mint)?.lastPriceSol) this.observe(p, this.priceFromSnapshot(m) ?? 0, m);
     });
     const onMigrate = (mint: string) => {
-      const p = this.positions.get(mint);
-      if (p) {
-        p.migrated = true;
-        this.series.delete(`liq:${mint}`); // curve → pool liquidity is a different series
-      }
+      const ps = this.forMint(mint);
+      for (const p of ps) p.migrated = true;
+      if (ps.length) this.series.delete(`liq:${mint}`); // curve → pool liquidity is a different series
     };
     bus.on('pumpfun.complete', (c) => onMigrate(c.mint));
     bus.on('pumpfun.migrated', (m) => onMigrate(m.mint));
+  }
+
+  private forMint(mint: string): Pos[] {
+    const ids = this.byMint.get(mint);
+    return ids ? [...ids].map((id) => this.positions.get(id)!).filter(Boolean) : [];
   }
 
   private priceFromSnapshot(m: MarketSnapshot): number | null {
@@ -87,38 +100,55 @@ export class PositionMonitor {
     return null;
   }
 
+  get shadowCount() {
+    let n = 0;
+    for (const p of this.positions.values()) if (p.signal.shadow) n++;
+    return n;
+  }
+
   open(sig: Signal) {
-    if (this.positions.has(sig.mint)) return;
+    const existing = this.forMint(sig.mint);
+    // One live alert per coin at a time; a shadow never duplicates anything.
+    if (existing.some((p) => !p.signal.shadow && p.closedTs === null)) return;
+    if (sig.shadow && (existing.length || this.shadowCount >= this.s.maxShadowPositions)) return;
     const book = this.books.get(sig.mint);
     const now = this.now();
+    const entry = sig.plan.entryPrice;
     const p: Pos = {
       signal: sig,
       state: {
-        entryPrice: sig.plan.entryPrice,
+        entryPrice: entry,
         entryTs: now,
-        peakPrice: sig.plan.entryPrice,
+        peakPrice: entry,
         remainingPct: 100,
         tp1Done: false,
         tp2Done: false,
         migrationDone: false,
         devTokensAtEntry: null,
         bundleTokensAtEntry: null,
+        belowStopSince: null,
+        stopPrice: entry * (1 - this.s.exit.stopLossPct / 100),
       },
       paper: new PaperPosition(this.s.paper),
-      outcome: new OutcomeTracker(sig.plan.entryPrice, now, this.s.outcomeCheckpointsMin),
+      outcome: new OutcomeTracker(entry, now, this.s.outcomeCheckpointsMin),
       creator: book?.creator,
       bundle: book?.complete ? book.bundleWallets() : [],
       pendingEntryUntil: now + this.s.paper.latencyMs,
+      missed: false,
       closedTs: null,
       migrated: sig.facts.migrated,
-      lastPrice: sig.plan.entryPrice,
+      lastPrice: entry,
       lastObsTs: now,
+      lastPathTs: 0,
+      emergency: null,
     };
     if (book?.complete && p.creator) {
       p.state.devTokensAtEntry = book.net(p.creator);
       p.state.bundleTokensAtEntry = p.bundle.reduce((a, w) => a + book.net(w), 0n);
     }
-    this.positions.set(sig.mint, p);
+    this.positions.set(sig.id, p);
+    this.byMint.set(sig.mint, new Set([...(this.byMint.get(sig.mint) ?? []), sig.id]));
+    this.hooks.onPrice?.(sig.id, now, entry);
   }
 
   private observation(p: Pos, price: number, m?: MarketSnapshot): Observation {
@@ -148,14 +178,30 @@ export class PositionMonitor {
     p.lastObsTs = now;
     this.registry.track(p.signal.mint, {}); // keep it alive in the registry
     p.outcome.observe(now, price);
+    const age = now - p.state.entryTs;
+    if (now - p.lastPathTs >= (age < 3600_000 ? 5000 : 60_000)) {
+      p.lastPathTs = now;
+      this.hooks.onPrice?.(p.signal.id, now, price);
+    }
+    const obs = this.observation(p, price, m);
+    if (!p.emergency) {
+      const reason = checkEmergency(p.state, obs, this.s);
+      if (reason) p.emergency = { ts: now, reason };
+    }
 
-    if (p.paper.entryPrice === 0) {
+    if (p.paper.entryPrice === 0 && !p.missed) {
       if (now < p.pendingEntryUntil) return;
-      p.paper.buy(now, price);
+      // The alert says "don't chase above +X%". If it already ran past that before a
+      // human could act, the honest paper result is: no trade.
+      if (price > p.signal.plan.maxEntryPrice) {
+        p.missed = true;
+        p.closedTs = now;
+        this.emit(p, 'missed_entry', 0, `price ran +${((price / p.state.entryPrice - 1) * 100).toFixed(0)}% before you could enter — don't chase; wait for a pullback or skip`);
+      } else p.paper.buy(now, price);
     }
     if (p.closedTs === null) {
-      const actions = evaluateExits(p.state, this.observation(p, price, m), this.s);
-      p.state = applyExits(p.state, actions, price);
+      const actions = evaluateExits(p.state, obs, this.s);
+      p.state = applyExits(p.state, actions, price, now);
       for (const a of actions) {
         p.paper.sell(now, a.sellPct, price, a.reason);
         this.emit(p, a.kind, a.sellPct, a.reason);
@@ -178,13 +224,14 @@ export class PositionMonitor {
       symbol: p.signal.facts.symbol,
       kind,
       sellPct,
-      remainingPct: p.state.remainingPct,
+      remainingPct: p.missed ? 0 : p.state.remainingPct,
       price: p.lastPrice,
       multiple: mult,
       mcapUsd: mcap,
       reason,
-      pnlPct: p.paper.pnlPct(p.state.remainingPct, p.lastPrice),
+      pnlPct: p.missed ? 0 : p.paper.pnlPct(p.state.remainingPct, p.lastPrice),
       ts: this.now(),
+      shadow: p.signal.shadow,
     });
   }
 
@@ -196,15 +243,20 @@ export class PositionMonitor {
       maxMultiple: p.outcome.maxMultiple,
       maxDrawdownPct: p.outcome.maxDrawdownPct,
       rugged: p.outcome.rugged,
-      pnlPct: p.paper.pnlPct(p.state.remainingPct, p.outcome.rugged ? 0 : p.lastPrice),
+      pnlPct: p.missed ? null : p.paper.pnlPct(p.state.remainingPct, p.outcome.rugged ? 0 : p.lastPrice),
       closedTs: p.closedTs,
+      emergencyTs: p.emergency?.ts ?? null,
+      emergencyReason: p.emergency?.reason ?? null,
     });
-    this.positions.delete(p.signal.mint);
+    this.positions.delete(p.signal.id);
+    const ids = this.byMint.get(p.signal.mint);
+    ids?.delete(p.signal.id);
+    if (ids && !ids.size) this.byMint.delete(p.signal.mint);
   }
 
   /** Periodic: time-based rules and DEX price refresh for migrated / non-pump tokens. */
   async tick() {
-    const dex = [...this.positions.values()].filter((p) => p.migrated || !this.books.get(p.signal.mint)?.lastPriceSol).map((p) => p.signal.mint);
+    const dex = [...new Set([...this.positions.values()].filter((p) => p.migrated || !this.books.get(p.signal.mint)?.lastPriceSol).map((p) => p.signal.mint))];
     if (dex.length && this.hooks.refreshMarket) {
       try {
         for (const [, m] of await this.hooks.refreshMarket(dex)) this.bus.emit('market.snapshot', m);
@@ -212,18 +264,25 @@ export class PositionMonitor {
         this.log.debug({ err: String(err) }, 'position market refresh failed');
       }
     }
-    for (const p of [...this.positions.values()]) {
-      // Re-run rules on the last price so time stops fire even without new trades.
-      // No trades for 10+ minutes on a curve token means it died: mark at last price.
-      this.observe(p, p.lastPrice);
-    }
+    // Re-run rules on the last price so time stops fire even without new trades.
+    for (const p of [...this.positions.values()]) this.observe(p, p.lastPrice);
   }
 
   openSummary(): string[] {
-    return [...this.positions.values()].map((p) => {
-      const m = p.lastPrice / p.state.entryPrice;
-      return `${p.signal.facts.symbol ?? p.signal.mint.slice(0, 6)} ${p.signal.mode} ${m.toFixed(2)}x, ${p.state.remainingPct.toFixed(0)}% held${p.closedTs ? ' (closed, tracking outcome)' : ''}`;
-    });
+    return [...this.positions.values()]
+      .filter((p) => !p.signal.shadow)
+      .map((p) => {
+        const m = p.lastPrice / p.state.entryPrice;
+        const state = p.missed ? ' (entry missed, tracking outcome)' : p.closedTs ? ' (closed, tracking outcome)' : '';
+        return `${p.signal.facts.symbol ?? p.signal.mint.slice(0, 6)} ${p.signal.mode} ${m.toFixed(2)}x, ${p.state.remainingPct.toFixed(0)}% held${state}`;
+      });
+  }
+
+  /** Live (non-shadow) positions still being traded. */
+  get openCount() {
+    let n = 0;
+    for (const p of this.positions.values()) if (!p.signal.shadow && p.closedTs === null) n++;
+    return n;
   }
 
   start() {

@@ -4,7 +4,8 @@ import { ed25519 } from '@noble/curves/ed25519';
 
 const PDA_MARKER = Buffer.from('ProgramDerivedAddress');
 
-function isOnCurve(bytes: Uint8Array): boolean {
+/** True for normal wallets (keys on the ed25519 curve); false for program-owned addresses (PDAs). */
+export function isOnCurve(bytes: Uint8Array): boolean {
   try {
     ed25519.ExtendedPoint.fromHex(bytes);
     return true;

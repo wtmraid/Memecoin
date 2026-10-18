@@ -47,6 +47,7 @@ export class Recorder {
       }),
     );
     bus.on('signal.buy', (s) => q(() => store.insertSignal(s)));
+    bus.on('signal.shadow', (s) => q(() => store.insertSignal(s)));
     bus.on('signal.update', (u) => q(() => store.insertSignalUpdate(u)));
     bus.on('wallet.trade', (w) =>
       q(() => {

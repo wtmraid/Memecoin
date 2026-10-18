@@ -23,6 +23,7 @@ import { TradeBooks } from './analysis/tradeBook.js';
 import { GmgnClient } from './safety/gmgn.js';
 import { JupiterSellSim } from './safety/jupiter.js';
 import { fetchMintInfo } from './safety/mintInfo.js';
+import { makeClusterAnalyzer } from './safety/clusters.js';
 import { RugcheckClient } from './safety/rugcheck.js';
 import { Evaluator } from './strategy/evaluator.js';
 import { PositionMonitor } from './strategy/positions.js';
@@ -215,12 +216,33 @@ export async function startApp(cfg: AppConfig, log: Logger): Promise<App> {
         rugcheck: env.ENABLE_RUGCHECK ? new RugcheckClient(new HttpClient(perMin(30))) : undefined,
         sellSim: new JupiterSellSim(new HttpClient(new TokenBucket(env.JUPITER_API_KEY ? 0.9 : 0.45, 1)), env.JUPITER_API_KEY),
         marketSnapshots: (m) => ds.snapshots(m),
+        clusters: rpc
+          ? makeClusterAnalyzer(rpc, (m) => fetchHolderStats(rpc, m, { maxPages: 1, useDas: false }), {
+              maxHolders: settings.filters.clusterMaxHolders,
+              freshMaxTx: settings.filters.freshMaxTx,
+              hubMinTxPerDay: settings.filters.hubMinTxPerDay,
+            })
+          : undefined,
       },
       { filters: settings.filters, scoring: settings.scoring, strategy: settings.strategy },
+    );
+    // Price paths of every tracked signal (live + shadow): what `npm run tune` replays.
+    let pricePath: { id: string; ts: number; price: number }[] = [];
+    loops.push(
+      setInterval(() => {
+        const rows = pricePath;
+        pricePath = [];
+        try {
+          store.insertSignalPrices(rows);
+        } catch (err) {
+          log.warn({ err: String(err) }, 'price path write failed');
+        }
+      }, 2000),
     );
     positions = new PositionMonitor(bus, registry, books, evaluator.sol, evaluator.series, settings.strategy, log, {
       refreshMarket: (m) => ds.snapshots(m),
       onOutcome: (o) => store.writeOutcome(o),
+      onPrice: (id, ts, price) => pricePath.push({ id, ts, price }),
     });
     evaluator.start();
     positions.start();
@@ -248,7 +270,7 @@ export async function startApp(cfg: AppConfig, log: Logger): Promise<App> {
         `${yes(env.GMGN_API_KEY)} GMGN · ${yes(env.JUPITER_API_KEY)} Jupiter key · ${yes(env.ENABLE_RUGCHECK)} RugCheck`,
         `${yes(evaluator!.sol.usd)} SOL price ${evaluator!.sol.usd ? `$${evaluator!.sol.usd.toFixed(0)}` : 'n/a'}`,
         `Watching <b>${registry.tokens.size}</b> tokens · deep-checked ${st.deepChecks} · rejected ${st.rejected}`,
-        `Signals sent <b>${st.signals}</b> · open ${positions!.positions.size}`,
+        `Signals sent <b>${st.signals}</b> · open ${positions!.openCount} · learning from ${positions!.shadowCount} silent near-misses`,
       ].join('\n');
     };
     const alerts = new AlertService(bus, log, {
@@ -278,7 +300,8 @@ export async function startApp(cfg: AppConfig, log: Logger): Promise<App> {
           dbWrites: recorder.written,
           mentionKeys: mentions.size,
           evaluator: evaluator?.stats,
-          openSignals: positions?.positions.size,
+          openSignals: positions?.openCount,
+          shadowSignals: positions?.shadowCount,
           solUsd: evaluator?.sol.usd ? Math.round(evaluator.sol.usd) : null,
         },
         'health',

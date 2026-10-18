@@ -50,7 +50,7 @@ describe('read-only guarantee (cannot touch your wallet)', () => {
 
   it('the only RPC methods used are read-only', () => {
     const methods = new Set(SOURCES.flatMap((s) => [...s.code.matchAll(/call(?:<[\s\S]*?>)?\(\s*'(\w+)'|this\.call\('(\w+)'|'(logsSubscribe)'/g)].map((m) => m[1] ?? m[2] ?? m[3])));
-    const READ_ONLY = new Set(['getTransaction', 'getAccountInfo', 'getTokenSupply', 'getTokenLargestAccounts', 'getMultipleAccounts', 'getTokenAccounts', 'logsSubscribe']);
+    const READ_ONLY = new Set(['getTransaction', 'getAccountInfo', 'getTokenSupply', 'getTokenLargestAccounts', 'getMultipleAccounts', 'getTokenAccounts', 'logsSubscribe', 'getSignaturesForAddress']);
     expect(methods.size).toBeGreaterThanOrEqual(5); // the scan really found the calls
     for (const m of methods) expect(READ_ONLY.has(m!), `unexpected RPC method ${m}`).toBe(true);
   });

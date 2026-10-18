@@ -23,6 +23,10 @@ export interface Signal extends Evaluation {
   mode: Mode;
   plan: TradePlan;
   ts: number;
+  /** Shadow = tracked silently for learning (near-miss score or sampled reject); never alerted. */
+  shadow?: boolean;
+  /** For sampled rejects: which filters failed. */
+  rejectIds?: string[];
 }
 
 export interface SignalUpdate {
@@ -40,4 +44,6 @@ export interface SignalUpdate {
   /** Paper P&L so far (closed positions: final). */
   pnlPct: number;
   ts: number;
+  /** Updates for silently tracked shadow signals are stored, never sent. */
+  shadow?: boolean;
 }

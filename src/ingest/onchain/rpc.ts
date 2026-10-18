@@ -84,6 +84,14 @@ export class SolanaRpc {
     return r.value.map((v) => ({ address: v.address, amount: BigInt(v.amount) }));
   }
 
+  /** Newest-first signatures for an address (read-only history lookup). */
+  getSignaturesForAddress(address: string, opts: { limit?: number; before?: string } = {}) {
+    return this.call<{ signature: string; blockTime: number | null; err: unknown }[]>('getSignaturesForAddress', [
+      address,
+      { limit: opts.limit ?? 1000, ...(opts.before ? { before: opts.before } : {}), commitment: 'confirmed' },
+    ]);
+  }
+
   /** Owners of SPL token accounts (jsonParsed). */
   async getTokenAccountOwners(addresses: string[]): Promise<Map<string, string>> {
     const out = new Map<string, string>();

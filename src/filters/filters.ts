@@ -230,6 +230,29 @@ export const FILTERS: FilterDef[] = [
     },
   },
   {
+    id: 'clusters',
+    label: 'Bubble clusters',
+    critical: false,
+    cheap: false,
+    check: (f, c) => {
+      if (f.clusterPct === null) return unknown('holder clusters');
+      if (f.devLinkedPct !== null && f.devLinkedPct > c.maxDevLinkedPct)
+        return { status: 'fail', value: p(f.devLinkedPct), reason: `${p(f.devLinkedPct)} of supply in wallets linked to the dev` };
+      if (f.clusterPct > c.maxClusterPct) {
+        const top = f.clusters[0];
+        return { status: 'fail', value: p(f.clusterPct), reason: `one funder controls ${top ? `${top.wallets} top wallets / ` : ''}${p(f.clusterPct)} of supply` };
+      }
+      return { status: 'pass', value: p(f.clusterPct), reason: `largest cluster ${p(f.clusterPct)}` };
+    },
+  },
+  {
+    id: 'fresh_wallets',
+    label: 'Fresh wallets',
+    critical: false,
+    cheap: false,
+    check: (f, c) => max(f.freshWalletPct, c.maxFreshWalletPct, 'fresh wallets', f.sources.freshWalletPct),
+  },
+  {
     id: 'socials',
     label: 'Socials',
     critical: false,

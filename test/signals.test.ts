@@ -26,7 +26,7 @@ const regOpts = { trackMaxAgeSec: 3600, maxTrackedTokens: 100, marketRefreshSec:
 const cleanSec = { ...sec, bundler_trader_amount_rate: '0.04' };
 const cleanInfo = { ...info, stat: { ...info.stat, top_bundler_trader_percentage: 0.04 }, link: { ...info.link, twitter_username: 'realcoin', website: 'https://realcoin.fun' } };
 
-function world(gmgnPayload: { info: object; sec: object }) {
+function world(gmgnPayload: { info: object; sec: object }, over: { strategy?: object; scoring?: object } = {}) {
   let now = 1_000_000;
   const bus = new EventBus((e, err) => {
     throw err;
@@ -37,19 +37,21 @@ function world(gmgnPayload: { info: object; sec: object }) {
   bus.on('pumpfun.trade', (t) => books.onTrade(t));
   const gmgn = { facts: vi.fn(async (m: string) => mapGmgn(m, gmgnPayload.info, gmgnPayload.sec)), devHistory: vi.fn(async () => ({ launches: 6, migrated: 2, gradRate: 0.33 })) } as unknown as GmgnClient;
   const sellSim = { simulate: vi.fn(async () => ({ routable: true, roundTripLossPct: 4, sellPriceImpactPct: 1 })) } as unknown as JupiterSellSim;
-  const strategy = StrategySchema.parse({ paper: { latencyMs: 0 } });
+  const strategy = StrategySchema.parse({ paper: { latencyMs: 0 }, ...over.strategy });
   const ev = new Evaluator(
     {
       bus, registry, books, mentions: new MentionTracker(), log: silent, gmgn, sellSim,
       mintInfo: async () => ({ mintAuthority: null, freezeAuthority: null, decimals: 6, supply: 1n, isToken2022: false, extensions: [], transferFeeBps: 0, dangerous: [] }),
       now: () => now,
     },
-    { filters: FiltersSchema.parse({}), scoring: ScoringSchema.parse({}), strategy },
+    { filters: FiltersSchema.parse({}), scoring: ScoringSchema.parse({ ...over.scoring }), strategy },
   );
   ev.sol.update(150);
   const pos = new PositionMonitor(bus, registry, books, ev.sol, ev.series, strategy, silent, {}, () => now);
   const signals: Signal[] = [];
   const updates: SignalUpdate[] = [];
+  const shadows: Signal[] = [];
+  bus.on('signal.shadow', (s) => shadows.push(s));
   bus.on('signal.buy', (s) => signals.push(s));
   bus.on('signal.update', (u) => updates.push(u));
 
@@ -82,7 +84,7 @@ function world(gmgnPayload: { info: object; sec: object }) {
     }
   };
   return {
-    bus, ev, pos, gmgn, sellSim, signals, updates, launch, trade, books,
+    bus, ev, pos, gmgn, sellSim, signals, updates, shadows, launch, trade, books,
     advance: (ms: number) => (now += ms),
     get now() {
       return now;
@@ -273,5 +275,53 @@ describe('Telegram commands', () => {
     await vi.waitFor(() => expect(sent).toHaveLength(1));
     bot.stopPolling();
     expect(sent[0].text).toContain('TELEGRAM_ALERT_CHAT_ID=123456');
+  });
+});
+
+describe('entry realism, shadows and pre-warming', () => {
+  it('if price runs past the "don\'t chase" limit before you could act, the paper trade is skipped', async () => {
+    const w = world({ info: cleanInfo, sec: cleanSec }, { strategy: { paper: { latencyMs: 1500 } } });
+    w.launch();
+    await w.ev.tick();
+    await vi.waitFor(() => expect(w.signals).toHaveLength(1));
+    // a +40% candle inside the reaction window
+    for (let i = 0; i < 10; i++) w.bus.emit('pumpfun.trade', w.trade(key(400 + i), true, 3_000_000_000n, w.now));
+    w.advance(2000);
+    w.bus.emit('pumpfun.trade', w.trade(key(450), true, 1_000_000n, w.now));
+    const missed = w.updates.find((u) => u.kind === 'missed_entry')!;
+    expect(missed.reason).toMatch(/don't chase/);
+    expect(w.updates.some((u) => u.kind === 'tp1')).toBe(false);
+  });
+
+  it('a safe near-miss (score just under the bar) is tracked silently, never alerted', async () => {
+    const w = world({ info: cleanInfo, sec: cleanSec }, { scoring: { minScoreSnipe: 99 } });
+    const sent: unknown[] = [];
+    w.bus.on('signal.update', (u) => !u.shadow && sent.push(u));
+    w.launch();
+    await w.ev.tick();
+    await vi.waitFor(() => expect(w.shadows).toHaveLength(1));
+    expect(w.signals).toHaveLength(0);
+    expect(w.shadows[0]!.shadow).toBe(true);
+    expect(w.pos.shadowCount).toBe(1);
+    expect(w.pos.openSummary()).toEqual([]); // not shown in /open
+    // its sell rules still run (for the tuner) but updates are flagged shadow
+    for (let i = 0; i < 40; i++) {
+      w.advance(1000);
+      w.bus.emit('pumpfun.trade', w.trade(key(500 + i), true, 3_000_000_000n, w.now));
+    }
+    expect(sent).toEqual([]);
+  });
+
+  it('pre-warms deep checks for a launch that is building, before it qualifies', async () => {
+    const w = world({ info: cleanInfo, sec: cleanSec });
+    w.bus.emit('token.created', { mint: MINT, name: 'Real Coin', symbol: 'REAL', uri: '', bondingCurve: key(79), creator: DEV, venue: 'pumpfun', signature: 'c', slot: 500, ts: w.now });
+    for (let i = 0; i < 15; i++) {
+      w.advance(2000);
+      w.bus.emit('pumpfun.trade', w.trade(key(600 + i), true, 300_000_000n, w.now));
+    }
+    await w.ev.tick(); // 15 buyers, 30s old: not yet SNIPE (needs 25) — but pre-warm starts
+    await vi.waitFor(() => expect(w.gmgn.facts).toHaveBeenCalledTimes(1));
+    expect(w.signals).toHaveLength(0);
+    expect(w.ev.stats.prewarms).toBe(1);
   });
 });

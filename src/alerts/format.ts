@@ -30,6 +30,7 @@ export function coreMetrics(f: TokenFacts, results: FilterResult[]): string[] {
     `${cell('Insiders', pct(f.insiderPct), 'insiders', 'insiderPct')}  ·  ${cell('Sniper', sniper, 'sniper', 'sniperPct')}`,
     `${cell('Dev holdings', pct(f.devHoldPct), 'dev_holding', 'devHoldPct')}  ·  Dev Migrated <b>${f.devMigrated ?? 'n/a'}</b>`,
     `${cell('Rug', f.rugRatio === null ? 'n/a' : pct(f.rugRatio * 100), 'dev_history')}${f.creatorStatus ? `  ·  Dev ${f.creatorStatus === 'hold' ? 'still holding' : 'sold/closed'}` : ''}`,
+    `🫧 Clusters <b>${f.clusterPct === null ? 'n/a' : pct(f.clusterPct)}</b>${f.clusters[0] ? ` (${f.clusters[0].wallets} wallets, one funder)` : ''} ${mark(r('clusters'))}  ·  Dev-linked ${pct(f.devLinkedPct)}  ·  Fresh ${pct(f.freshWalletPct)} ${mark(r('fresh_wallets'))}`,
   ];
 }
 
@@ -126,6 +127,7 @@ const UPDATE_ICON: Record<SignalUpdate['kind'], string> = {
   emergency: '🚨 SELL NOW',
   max_hold: '⏰ SELL',
   closed: '🏁 CLOSED',
+  missed_entry: '⛔ NO ENTRY',
 };
 
 /** Sell recommendation, sent as a reply to the original alert. */

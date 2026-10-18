@@ -68,6 +68,8 @@ const FEATURES: Record<FeatureKey, (f: TokenFacts, s: ScoringSettings) => [numbe
       f.bundlerPct === null ? null : 1 - lerp(f.bundlerPct, 0, 25),
       f.insiderPct === null ? null : 1 - lerp(f.insiderPct, 0, 12),
       f.sniperPct === null ? null : 1 - lerp(f.sniperPct, 0, 12),
+      f.clusterPct === null ? null : 1 - lerp(f.clusterPct, 3, 15),
+      f.freshWalletPct === null ? null : 1 - lerp(f.freshWalletPct, 30, 70),
     ].filter((x): x is number => x !== null);
     return parts.length ? [parts.reduce((a, b) => a + b, 0) / parts.length, 'holder spread'] : [null, 'n/a'];
   },

@@ -30,6 +30,8 @@ export interface BusEvents {
   'signal.buy': Signal;
   /** Sell recommendation / position update for an earlier signal. */
   'signal.update': SignalUpdate;
+  /** Silent paper-tracking of near-misses / sampled rejects (for the tuner). */
+  'signal.shadow': Signal;
 }
 
 type Handler<T> = (payload: T) => void;

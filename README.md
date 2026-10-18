@@ -31,6 +31,7 @@ Bundler 4% ✅  ·  Phishing 1.1% ✅
 Insiders 0% ✅  ·  Sniper 2.4% ✅
 Dev holdings 1.9% ✅  ·  Dev Migrated 6
 Rug 2% ✅  ·  Dev sold/closed
+🫧 Clusters 4.1% (3 wallets, one funder) ✅  ·  Dev-linked 0%  ·  Fresh 22% ✅
 ✅ NoMint  ✅ NoFreeze  ✅ LP  ✅ Top10  ✅ Sellable
 
 Why now — 96 unique buyers in 4m · curve 41% · 2m buy/sell 3.1
@@ -75,13 +76,21 @@ coordinated dump. Every other tile on it was fine, and that one is enough.
    - RugCheck.
    - The dev's launch history (rug ratio, serial farms, launches in the last 24h).
    - Socials: real account, not a borrowed tweet, not recycled from another token.
+   - **Bubblemaps-style clusters**: for the top 15 holders, the bot finds who sent each wallet
+     its first SOL. Wallets sharing a funder are one person; one funder controlling >15% of supply,
+     or wallets linked to the dev holding >5%, is a reject. Exchange hot wallets are recognised
+     and not used as links. Fresh-wallet share (sybil swarms) is checked too.
    - A Jupiter **sell test**, run last: buy, then sell the same amount back, to catch
      honeypots and hidden taxes.
+   - Deep checks are **pre-warmed** while a launch is building (12+ buyers), so when it
+     qualifies the alert goes out immediately instead of waiting on APIs.
 5. **Score 0–100** from buy pressure, unique-buyer velocity, volume breakout, holder growth,
    liquidity growth, smart money and KOLs, social mentions (rug/scam chatter penalised),
    holder distribution and dev quality. It alerts only at 65 or above (SCALP: 70) with at
    least 50% of inputs available.
-6. **Follow-up.** Every alert is paper-traded with slippage, fees, priority fee, Jito tip and
+6. **Follow-up.** Stops ignore one-trade wicks (price must stay below the stop 8 s, unless it
+   crashes 15% further). If the price runs past the "don't chase" limit before you could act, the
+   bot tells you to skip it instead of pretending you got in. Every alert is paper-traded with slippage, fees, priority fee, Jito tip and
    reaction latency. Exit rules fire as Telegram replies. Outcomes at +1m, +5m, +15m, +1h and
    +24h, plus max gain, max drawdown and rug status, go into SQLite for `npm run report`.
 
@@ -116,6 +125,20 @@ npm start               # run the scanner 24/7
   `TELEGRAM_CHANNELS` and `TELEGRAM_KOL_CHANNELS` with `ENABLE_TELEGRAM=true`. Its calls then count
   toward the social score and pull those tokens into the scanner.
 - CLI equivalent: `npm run scan -- <CA>`.
+
+## Getting better over time (`npm run tune`)
+The bot also **silently follows near-misses** (safe coins that scored up to 20 points under the
+bar) and a 25% sample of rejected coins. Their real price paths are saved. After a week or two:
+
+```
+npm run tune            # report only
+npm run tune -- --write # also writes tuned.json (next to the DB) if it's a proven improvement
+```
+It replays every logged coin under 324 exit-rule combinations × score bars, picks the best on
+**older** data and only recommends it if it also wins on **newer data it never saw**
+(walk-forward, no lookahead, ≥20 unseen trades). It also shows what each safety filter saved
+you: how many of its rejects rugged vs would have 2x'd. To use tuned settings set
+`CONFIG_PATH` to the tuned.json it wrote and restart. Nothing changes automatically.
 
 ## Is it working? (`npm run report`)
 
@@ -154,9 +177,9 @@ docker compose logs -f scanner     # "health" line every minute: tracked tokens,
 | Phase | Status |
 |---|---|
 | 1. Ingestion (on-chain, market, social, smart money) | ✅ |
-| 2. Safety filters (20 checks, each unit-tested) | ✅ |
+| 2. Safety filters (22 checks incl. Bubblemaps-style clusters, each unit-tested) | ✅ |
 | 3. Scoring, SNIPE/SCALP, Telegram/Discord alerts, sell follow-ups | ✅ (web dashboard pending) |
-| 4. Paper trading, outcome logging, `npm run report` | ✅. The threshold tuner script is pending (it needs logged data first) |
+| 4. Paper trading, shadow tracking, `npm run report`, walk-forward `npm run tune` | ✅ |
 | 5. Live execution | **not built**. Only on explicit request, dry-run by default |
 
 ## Known limitations

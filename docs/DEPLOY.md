@@ -62,6 +62,18 @@ docker compose up -d --build
 docker compose logs -f scanner
 ```
 
+## After 1–2 weeks: let it tune itself
+In Railway open the service → **⋯ → Shell** (or *Connect*), then run:
+```
+npm run report          # how alerts performed (after fees & slippage)
+npm run tune            # what settings would have done better — proven on unseen data
+```
+If `tune` prints ✅:
+1. Run `npm run tune -- --write` (saves `/app/data/tuned.json` on your volume).
+2. In **Variables** add `CONFIG_PATH=/app/data/tuned.json`. Railway restarts the bot with the new settings.
+3. To undo, delete that variable.
+If it prints ⏸, change nothing — it's telling you the evidence isn't strong enough yet.
+
 ## Checking performance after a week
 Run `npm run report` on the server (Railway: service → *Shell*), or ask for a dashboard.
 It shows win rate and average profit per trade (after fees and slippage) per mode and score

@@ -14,10 +14,10 @@ const db = new Database(cfg.env.DB_PATH, { readonly: true });
 const rows = db
   .prepare(
     `SELECT mode, score, ts_ms, paper_pnl_pct, max_multiple, max_drawdown_pct, rugged
-     FROM signals WHERE outcome_ms IS NOT NULL AND ts_ms > ?`,
+     FROM signals WHERE outcome_ms IS NOT NULL AND ts_ms > ? AND COALESCE(shadow, 0) = 0 AND paper_pnl_pct IS NOT NULL`,
   )
   .all(Date.now() - days * 86_400_000) as OutcomeRow[];
-const pending = (db.prepare('SELECT COUNT(*) c FROM signals WHERE outcome_ms IS NULL').get() as { c: number }).c;
+const pending = (db.prepare('SELECT COUNT(*) c FROM signals WHERE outcome_ms IS NULL AND COALESCE(shadow, 0) = 0').get() as { c: number }).c;
 
 const p = (x: number) => `${(x * 100).toFixed(0)}%`.padStart(5);
 const f = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(1)}%`.padStart(8);

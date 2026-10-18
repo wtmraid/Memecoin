@@ -45,6 +45,17 @@ export const FiltersSchema = z.object({
   requireSellSim: z.boolean().default(true),
   maxSellLossPct: z.number().default(15),
   sellSimSizeSol: z.number().default(0.5),
+  /** Bubblemaps-style: largest group of top holders sharing one funder, % of supply. */
+  maxClusterPct: z.number().default(15),
+  /** % of supply in top holders linked to the dev wallet (funded by / funding the dev). */
+  maxDevLinkedPct: z.number().default(5),
+  /** % of holders that are brand-new wallets (GMGN fresh rate, else our top-holder sample). */
+  maxFreshWalletPct: z.number().default(70),
+  clusterMaxHolders: z.number().int().default(15),
+  /** A wallet with ≤ this many transactions in its whole history counts as fresh. */
+  freshMaxTx: z.number().int().default(30),
+  /** Funders sending ≥ this many tx/day are exchanges/services — not used to link wallets. */
+  hubMinTxPerDay: z.number().default(1000),
   requireSocials: z.boolean().default(true),
   /** Reject when the same X account / website was used by another token in the last 7 days. */
   rejectRecycledSocials: z.boolean().default(true),
@@ -79,6 +90,16 @@ export const StrategySchema = z.object({
   deepCheckTtlSec: z.number().default(60),
   deepCheckConcurrency: z.number().int().default(2),
   recheckRejectedAfterSec: z.number().default(300),
+  /** Start deep checks early for young launches with this many unique buyers… */
+  prewarmMinBuyers: z.number().int().default(12),
+  /** …and at least this old (seconds). */
+  prewarmMinAgeSec: z.number().default(25),
+  prewarmConcurrency: z.number().int().default(1),
+  /** Silently track tokens that scored up to this many points below the alert bar. */
+  shadowScoreBelow: z.number().default(20),
+  /** Share of deep-check rejects to track silently (measures what each filter saves you). */
+  shadowRejectSampleRate: z.number().min(0).max(1).default(0.25),
+  maxShadowPositions: z.number().int().default(300),
   snipe: z
     .object({
       maxAgeSec: z.number().default(900),
@@ -112,6 +133,13 @@ export const StrategySchema = z.object({
   exit: z
     .object({
       stopLossPct: z.number().default(30),
+      /**
+       * Stop only fires after price stays below it this long — one whale sell on a thin
+       * curve often wicks through and recovers. 0 = instant.
+       */
+      stopConfirmSec: z.number().default(8),
+      /** …but below the stop by this much more, sell instantly (it's a crash, not a wick). */
+      hardStopExtraPct: z.number().default(15),
       tp1Multiple: z.number().default(2),
       tp1SellPct: z.number().default(50),
       tp2Multiple: z.number().default(3),

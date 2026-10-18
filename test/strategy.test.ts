@@ -91,7 +91,19 @@ describe('exit rules', () => {
     expect(at(2.1).map((a) => [a.kind, a.sellPct])).toEqual([['tp1', 50]]);
     expect(at(3.2).map((a) => [a.kind, a.sellPct])).toEqual([['tp1', 50], ['tp2', 25]]);
   });
-  it('stop-loss sells everything at −30%', () => expect(at(0.69)[0]).toMatchObject({ kind: 'stop_loss', sellPct: 100 }));
+  it('stop-loss ignores a one-trade wick but fires if price stays below the stop', () => {
+    const stop = 0.7;
+    expect(at(0.69)).toEqual([]); // just dipped: start the clock, don't sell yet
+    const s1 = applyExits({ ...base, stopPrice: stop }, [], 0.69, 0);
+    expect(s1.belowStopSince).toBe(0);
+    expect(evaluateExits(s1, { now: 5_000, price: 0.68 }, S)).toEqual([]); // 5s < 8s
+    expect(evaluateExits(s1, { now: 9_000, price: 0.68 }, S)[0]).toMatchObject({ kind: 'stop_loss', sellPct: 100 });
+    const recovered = applyExits(s1, [], 0.75, 3_000); // wick recovered → clock resets
+    expect(recovered.belowStopSince).toBeNull();
+  });
+  it('a crash far below the stop sells instantly', () => {
+    expect(at(0.55)[0]).toMatchObject({ kind: 'stop_loss', sellPct: 100 });
+  });
   it('trailing stop only after TP1', () => {
     const after = applyExits(base, at(2.5), 2.5); // TP1 done, peak 2.5
     expect(after).toMatchObject({ tp1Done: true, remainingPct: 50, peakPrice: 2.5 });
