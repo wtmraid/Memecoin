@@ -14,6 +14,11 @@ import { PROGRAM_IDS } from '../src/ingest/onchain/programs.js';
 import { decodePumpLogs } from '../src/ingest/onchain/pumpfun.js';
 import { RedditClient } from '../src/ingest/social/reddit.js';
 import { logger } from '../src/core/logger.js';
+import { GmgnClient } from '../src/safety/gmgn.js';
+import { JupiterSellSim } from '../src/safety/jupiter.js';
+import { RugcheckClient } from '../src/safety/rugcheck.js';
+import { fetchMintInfo } from '../src/safety/mintInfo.js';
+import { TelegramBot } from '../src/alerts/telegram.js';
 
 const cfg = loadConfig();
 const http = () => new HttpClient(new TokenBucket(1, 1));
@@ -67,6 +72,27 @@ if (cfg.wsUrl) {
       }, 15_000);
     }),
   );
+}
+if (cfg.env.GMGN_API_KEY) {
+  await check('GMGN token info + security', async () => {
+    const g = await new GmgnClient(new HttpClient(new TokenBucket(2, 2)), cfg.env.GMGN_API_KEY!).facts(BONK);
+    return `top10=${g.top10Pct}% bundler=${g.bundlerPct}% insiders=${g.insiderPct}% phishing=${g.phishingPct}% rug=${g.rugRatio} devMigrated=${g.devMigrated} mintRenounced=${g.mintRenounced}`;
+  });
+}
+await check('Jupiter sell simulation (0.1 SOL)', async () => {
+  const r = await new JupiterSellSim(http(), cfg.env.JUPITER_API_KEY).simulate(BONK, 0.1);
+  if (!r.routable) throw new Error(r.error ?? 'no route');
+  return `round-trip loss ${r.roundTripLossPct}% impact ${r.sellPriceImpactPct}%`;
+});
+if (cfg.env.ENABLE_RUGCHECK) await check('RugCheck summary', async () => JSON.stringify(await new RugcheckClient(http()).summary(BONK)));
+if (cfg.rpcUrl) await check('RPC mint info', async () => JSON.stringify(await fetchMintInfo(new SolanaRpc(cfg.rpcUrl!, http()), BONK), (_k, v) => (typeof v === 'bigint' ? v.toString() : v)));
+if (cfg.env.TELEGRAM_BOT_TOKEN && cfg.env.TELEGRAM_ALERT_CHAT_ID) {
+  await check('Telegram bot can post to the alert chat', async () => {
+    const bot = new TelegramBot(http(), cfg.env.TELEGRAM_BOT_TOKEN!, logger, 0);
+    const id = await bot.send(cfg.env.TELEGRAM_ALERT_CHAT_ID!, '✅ memecoin-scanner smoke test', { gmgnMint: BONK });
+    if (!id) throw new Error('send failed — is the bot a member/admin of the chat?');
+    return `message ${id}`;
+  });
 }
 if (cfg.env.REDDIT_CLIENT_ID && cfg.env.REDDIT_CLIENT_SECRET && cfg.env.REDDIT_USER_AGENT) {
   await check('Reddit r/solana/new', async () => {

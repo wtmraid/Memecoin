@@ -11,6 +11,7 @@ import type {
   HolderStats,
   BondingCurveState,
 } from './types.js';
+import type { Signal, SignalUpdate } from '../strategy/types.js';
 
 export interface BusEvents {
   'token.created': TokenCreated;
@@ -25,6 +26,10 @@ export interface BusEvents {
   'wallet.trade': WalletTrade;
   /** Discovery hint from trending feeds: a mint worth tracking. */
   'token.discovered': { mint: string; source: string; ts: number };
+  /** Phase 3: a token passed every filter and the score bar. */
+  'signal.buy': Signal;
+  /** Sell recommendation / position update for an earlier signal. */
+  'signal.update': SignalUpdate;
 }
 
 type Handler<T> = (payload: T) => void;

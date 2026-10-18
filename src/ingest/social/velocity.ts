@@ -1,7 +1,12 @@
 import type { SocialMention, SocialSource } from '../../core/types.js';
 
+/** Words that, in a post about a token, mean people are calling it a rug. */
+const NEGATIVE = /\b(rug(ged|pull)?|scam|honeypot|hp|jeet(s|ed)?|dump(ed|ing)?|dead|exit ?scam|bundled)\b/i;
+export const isNegativeText = (t: string) => NEGATIVE.test(t);
+
 interface Hit {
   ts: number;
+  negative: boolean;
   author: string;
   source: SocialSource;
   isKol: boolean;
@@ -13,6 +18,7 @@ export interface Velocity {
   count: number;
   uniqueAuthors: number;
   kolMentions: number;
+  negativeMentions: number;
   /** Mentions per minute in this window. */
   perMin: number;
   /** count(this window) / count(previous window of same length); Infinity when previous is 0. */
@@ -36,7 +42,7 @@ export class MentionTracker {
     const keys = MentionTracker.keys(m);
     for (const k of keys) {
       const arr = this.hits.get(k) ?? [];
-      arr.push({ ts: m.ts, author: m.author, source: m.source, isKol: m.isKol });
+      arr.push({ ts: m.ts, author: m.author, source: m.source, isKol: m.isKol, negative: isNegativeText(m.text) });
       this.hits.set(k, arr);
     }
     return keys;
@@ -56,6 +62,7 @@ export class MentionTracker {
       count: cur.length,
       uniqueAuthors: new Set(cur.map((h) => `${h.source}:${h.author}`)).size,
       kolMentions: cur.filter((h) => h.isKol).length,
+      negativeMentions: cur.filter((h) => h.negative).length,
       perMin: cur.length / (windowSec / 60),
       acceleration: prev === 0 ? (cur.length ? Infinity : 0) : cur.length / prev,
       bySource,

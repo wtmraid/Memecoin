@@ -1,120 +1,169 @@
 # Memecoin scanner (Solana)
 
-A scanner and signal bot for Solana memecoins. It finds new and trending tokens,
-filters out rugs, scores what's left and sends alerts. It learns from logged outcomes.
+Finds new and trending Solana memecoins, rejects rugs, scores the rest, and sends
+**Telegram alerts with an entry/exit plan**. It then follows every alert and sends
+**sell recommendations** (take-profit, stop, emergency exits) as replies to the alert.
+The only link in alerts is the token's **GMGN page**.
 
-> **Status: Phase 1 (data ingestion) is done.** It has no alerts, no scoring and no
-> trading. Live trading is not built and will only be built on explicit request
-> (Phase 5). Nothing here is financial advice.
+> **Read this first.** No bot can predict memecoins. Most pump.fun launches go to zero,
+> and a good filter still loses on many trades. This bot is built to (1) avoid the
+> mechanical rug patterns — bundles, insiders, dev farms, honeypots, mint/freeze tricks —
+> and (2) cut losers fast while letting winners run. Every alert is a **rule-based
+> signal, not financial advice**. Paper-trade it (it does this automatically) and check
+> `npm run report` before you put real money behind it.
 
-- Plan & architecture: [docs/PLAN.md](docs/PLAN.md)
-- API research (endpoints, limits, pricing as of 2026-10-16): [docs/RESEARCH.md](docs/RESEARCH.md)
+- Plan & architecture: [docs/PLAN.md](docs/PLAN.md) · API research: [docs/RESEARCH.md](docs/RESEARCH.md)
 
-## What Phase 1 ingests
+## What an alert looks like
 
-| Data | Source | How |
-|---|---|---|
-| New pump.fun tokens, every curve trade, curve complete, PumpSwap migration | Helius WS `logsSubscribe` on the pump.fun program | Anchor events decoded straight from logs, so no extra RPC calls |
-| New pools: PumpSwap, Raydium CPMM / LaunchLab, Meteora DAMM v2 / DBC (opt-in: Raydium AMM v4, CLMM, Meteora DLMM, DAMM v1) | `logsSubscribe` per program, then one `getTransaction` | Pair found from vault balances, which works on any DEX |
-| Bonding-curve progress | Trade-event reserves (free); `getAccountInfo` fallback | `progress = tokens sold / 793.1M` |
-| Price, liquidity, volume, buys/sells, socials | DexScreener `tokens/v1` (30 mints per call) | Refreshed for every tracked token |
-| New/trending pools, unique buyers/sellers | GeckoTerminal keyless | Slow discovery poll |
-| Top holders (with owners), holder count | RPC `getTokenLargestAccounts`, Helius DAS `getTokenAccounts` | Rate-limited, newest tokens first |
-| Mentions of CAs and $TICKERs, plus velocity | Reddit (official API), Telegram (GramJS user client), X (budgeted) | Per-token 5m/1h counts, unique authors, KOL hits, acceleration |
-| Smart-money buys | `logsSubscribe` per wallet, then balance diff | Works on any DEX, ignores plain transfers |
+_Illustrative example (made-up token and numbers):_
 
-Everything goes to SQLite (`data/scanner.db`): tables `tokens`, `pools`, `pump_trades`,
-`curve_snapshots`, `market_snapshots`, `holder_snapshots`, `mentions`, `wallet_trades`.
+```
+🎯 SNIPE · Score 78/100 · data 92%
+$REAL (Real Coin)
+7xKX…pump                                  ← full CA, tap to copy
+⏱ 4m · 📈 Curve 41% · 22.6 SOL · MC $18.4K · 👥 96
+
+Core Metrics                               ← same tiles as GMGN's Data tab
+Taxes 1.25% ✅  ·  Top 10 18.2% ✅
+Bundler 4% ✅  ·  Phishing 1.1% ✅
+Insiders 0% ✅  ·  Sniper 2.4% ✅
+Dev holdings 1.9% ✅  ·  Dev Migrated 6
+Rug 2% ✅  ·  Dev sold/closed
+✅ NoMint  ✅ NoFreeze  ✅ LP  ✅ Top10  ✅ Sellable
+
+Why now — 96 unique buyers in 4m · curve 41% · 2m buy/sell 3.1
+• buyerVelocity 100/100 — 71 unique buyers / 5m
+• buyPressure 88/100 — 72% buys (5m)  …
+
+Plan (rule, not advice)
+• Entry: now, up to MC $21.2K (+15%). Above that, don't chase; wait for a pullback.
+• Stop-loss: −30% → MC $12.9K
+• TP1: 2x (MC $36.8K) → sell 50% (gets your initial back)
+• TP2: 3x (MC $55.2K) → sell 25%
+• Rest: trailing stop 30% below the peak after TP1
+• Time stop: not +20% after 30 min → exit
+• Emergency exit: dev sells ≥20% · bundle wallets dump ≥30% · liquidity −30% · sell wall
+🔗 Open on GMGN   [📈 Open on GMGN] button → https://gmgn.ai/sol/token/<CA>
+```
+
+Follow-ups arrive as **replies** to that alert:
+`💰 TAKE PROFIT 50% of position · TP1 hit: 2.04x` → `🚨 SELL NOW 50% · dev sold 100% of their bag` → `🏁 CLOSED · paper P&L +41.3%`.
+
+The token from your screenshot (Bundler **31.75%**) would be **rejected**. More than
+20% of supply bought by bot-bundled wallets at launch is the classic setup for a
+coordinated dump. Every other tile on it was fine, and that one is enough.
+
+## How it decides
+
+1. **Discovery.** pump.fun launches stream in live from Helius WebSockets. New pools on PumpSwap,
+   Raydium and Meteora, DexScreener and GeckoTerminal trending lists, Reddit, Telegram channels
+   (including caller/volume-signal channels you follow) and your smart wallets are added on top.
+2. **Cheap gates, every 5 s, free.** For each token, metrics are computed from the trades the bot
+   has seen: bundle share (buys in the creation slot), snipers, dev holdings, top 10, wash churn,
+   curve SOL and minimum age.
+3. **Earliest entry.** A token qualifies as soon as it shows real, distributed demand:
+   - **SNIPE** (under 15 min): at least 25 unique buyers, curve between 12% and 85%, and
+     buyers outnumbering sellers over the last 2 min. It deliberately skips the first ~60 s,
+     when bundles, snipers and dev dumps happen and safety data means nothing yet.
+   - **SCALP** (over 15 min): 5-minute volume at least 2.5× the hourly average, price up 3–40%
+     (so it doesn't chase a vertical candle), buyers in control.
+4. **Deep safety checks, only for candidates:**
+   - GMGN Core Metrics.
+   - On-chain mint account: mint and freeze authority, dangerous Token-2022 extensions.
+   - RugCheck.
+   - The dev's launch history (rug ratio, serial farms, launches in the last 24h).
+   - Socials: real account, not a borrowed tweet, not recycled from another token.
+   - A Jupiter **sell test**, run last: buy, then sell the same amount back, to catch
+     honeypots and hidden taxes.
+5. **Score 0–100** from buy pressure, unique-buyer velocity, volume breakout, holder growth,
+   liquidity growth, smart money and KOLs, social mentions (rug/scam chatter penalised),
+   holder distribution and dev quality. It alerts only at 65 or above (SCALP: 70) with at
+   least 50% of inputs available.
+6. **Follow-up.** Every alert is paper-traded with slippage, fees, priority fee, Jito tip and
+   reaction latency. Exit rules fire as Telegram replies. Outcomes at +1m, +5m, +15m, +1h and
+   +24h, plus max gain, max drawdown and rug status, go into SQLite for `npm run report`.
+
+Every threshold, weight and exit level is in [`config/default.json`](config/default.json).
 
 ## Setup
 
 ```bash
-node -v            # 20+ (22 recommended)
+node -v                 # 20+ (22 recommended)
 npm install
-cp .env.example .env   # add HELIUS_API_KEY at minimum
-npm test               # 76 unit tests
-npm run smoke          # live check of every configured API: run this first
-npm run ingest         # start Phase 1
+cp .env.example .env    # fill in the keys below
+npm test                # unit tests (191)
+npm run smoke           # live check of every API + sends a test message to Telegram
+npm start               # run the scanner 24/7
 ```
 
-Optional sources:
-- **Reddit:** create a "script" app at reddit.com/prefs/apps, fill the `REDDIT_*` vars and set `ENABLE_REDDIT=true`.
-  The free tier is non-commercial only, and new apps may need manual approval.
-- **Telegram:** get your own api_id and hash at my.telegram.org, run `npm run telegram:login`, paste the
-  session into `.env`, list the channels in `TELEGRAM_CHANNELS` and set `ENABLE_TELEGRAM=true`. Use an
-  aged account. The client only reads and never sends.
-- **X:** set `X_PROVIDER=official` (or `twitterapi_io`) with a key, and list `KOL_X_HANDLES`.
-  `social.xMaxReadsPerDay` in `config/default.json` is a hard cap enforced in code.
-- **Smart wallets:** `SMART_WALLETS=addr1,addr2` and `ENABLE_SMART_WALLETS=true`.
+| Key | Where | Needed for |
+|---|---|---|
+| `HELIUS_API_KEY` | dashboard.helius.dev (free plan works) | live pump.fun stream, mint checks |
+| `GMGN_API_KEY` | gmgn.ai/ai | the GMGN Core Metrics (bundler, insiders, phishing, rug ratio, dev migrated). Without it the bot falls back to its own on-chain estimates, and insiders, phishing and rug ratio show as unknown |
+| `JUPITER_API_KEY` | developers.jup.ag | sell test at 1 rps (keyless works at 0.5 rps) |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALERT_CHAT_ID` | @BotFather; add the bot to your chat | alerts |
 
-All tunables (refresh rates, budgets, venues, rate limits) are in `config/default.json`.
-Secrets are only ever read from `.env`.
+**GMGN note:** its API is IPv4-only. If you get 401/403 with a valid key on a VPS, disable IPv6.
 
-## API costs (as of 2026-10-16, see docs/RESEARCH.md)
+### Using it from Telegram
+- Alerts and sell updates arrive in `TELEGRAM_ALERT_CHAT_ID`.
+- **Paste any CA** (or `/scan <CA>`) in that chat to get a full scan with the same layout and a
+  verdict: `✅ ENTRY`, `⏳ SAFE SO FAR, NO ENTRY YET`, `⚠️ WEAK MOMENTUM` or `❌ REJECT` with reasons.
+- `/open` lists the signals being tracked.
+- Following a signal channel (like a pump.fun volume-signal group)? Put its username in
+  `TELEGRAM_CHANNELS` and `TELEGRAM_KOL_CHANNELS` with `ENABLE_TELEGRAM=true`. Its calls then count
+  toward the social score and pull those tokens into the scanner.
+- CLI equivalent: `npm run scan -- <CA>`.
+
+## Is it working? (`npm run report`)
+
+_Example layout (illustrative numbers):_
+```
+group                          n  win   avgWin  avgLoss  expect.   maxDD   ≥2x  ≥3x  rug
+ALL                           84  38%   +71.2%   -24.9%    +11.6%  -148.0%  31%  17%   6%
+mode=SNIPE score=80-89        21  48%  …
+```
+Positive **expectancy** (average P&L per trade after all costs) is what matters, not win
+rate. The stats are noise until you have at least 50 finished signals. If a score bucket or mode is
+negative, raise its threshold in `config/default.json`.
+
+## API costs (as of 2026-10, see docs/RESEARCH.md)
 
 | Service | Needed? | Cost |
 |---|---|---|
-| Helius | **yes** (or another RPC) | Free: 1M credits/mo, ~10 RPC rps. Developer $49/mo (10M). LaserStream/Enhanced WS on mainnet need Business ($499/mo) and are **not** required. |
-| DexScreener | yes | Free, no key (~300 req/min, ~60/min on profile/boost endpoints) |
-| GeckoTerminal | optional | Free, keyless ~10 calls/min |
-| Birdeye | optional | Free 1 rps (30k CU), Starter $99/mo |
-| Jupiter (Phase 2 sell sim) | Phase 2 | Free key: 1 rps. Keyless: 0.5 rps. lite-api is being retired |
-| RugCheck (Phase 2) | Phase 2 | Free |
-| Reddit | optional | Free (non-commercial) |
-| Telegram | optional | Free |
-| X official | optional | Pay-per-use **$0.005 per post read**. Watching a 30-KOL list is about $1–2/day; broad token search is about $1k+/day, so it isn't used |
-| twitterapi.io | optional alternative | About $0.15 per 1k tweets (third-party, unofficial) |
-| VPS | for 24/7 | About $5–10/mo (2 vCPU, 2 GB RAM is enough for Phase 1–3) |
+| Helius | **yes** | Free: 1M credits/mo. Developer $49/mo. The pump.fun stream is the main credit user; watch the dashboard on day 1 |
+| GMGN OpenAPI | strongly recommended | Free plan (~5 req/s); paid plans raise limits |
+| Jupiter | yes (sell test) | Free key 1 rps |
+| DexScreener, GeckoTerminal, RugCheck | yes | Free, no key |
+| Telegram Bot | yes | Free |
+| Reddit / Telegram user client | optional | Free |
+| X API | optional | $0.005 per post read: KOL list only (see RESEARCH) |
+| VPS | 24/7 | ~$5–10/mo, IPv4 |
 
-**Helius credit budget:** WS traffic costs 2 credits per 0.1 MB. The pump.fun log stream
-(every trade) is the main cost. Check the Helius dashboard during the first day. If you
-burn through the free 1M credits, set `ENABLE_PUMPFUN_TRADES=false` or move to Developer.
-
-## Running 24/7 (docker-compose)
+## Running 24/7
 
 ```bash
-cp .env.example .env && $EDITOR .env
 docker compose up -d --build
-docker compose logs -f scanner      # a "health" line prints every minute
+docker compose logs -f scanner     # "health" line every minute: tracked tokens, signals, SOL price
 ```
 
-The SQLite DB lives in the `scanner-data` volume. `config/` is mounted read-only,
-so you can retune without rebuilding (`docker compose restart scanner`).
+## Phases
 
-## Running each phase
+| Phase | Status |
+|---|---|
+| 1. Ingestion (on-chain, market, social, smart money) | ✅ |
+| 2. Safety filters (20 checks, each unit-tested) | ✅ |
+| 3. Scoring, SNIPE/SCALP, Telegram/Discord alerts, sell follow-ups | ✅ (web dashboard pending) |
+| 4. Paper trading, outcome logging, `npm run report` | ✅. The threshold tuner script is pending (it needs logged data first) |
+| 5. Live execution | **not built**. Only on explicit request, dry-run by default |
 
-| Phase | Command | Status |
-|---|---|---|
-| 1. Ingestion | `npm run ingest` | ✅ built and tested |
-| 2. Safety filters | — | next |
-| 3. Scoring, alerts, dashboard | — | pending |
-| 4. Paper trading and evaluation | — | pending |
-| 5. Live execution | — | only on request |
-
-## Repo layout
-
-```
-src/
-  core/        event bus, rate-limited HTTP, logger, types
-  config/      env + JSON settings (zod-validated)
-  ingest/
-    onchain/   WS client, RPC, pump.fun decoder, pool detector, bonding curve, holders
-    market/    DexScreener, GeckoTerminal, Birdeye
-    social/    CA/ticker extraction, velocity, Reddit, Telegram, X
-    smartmoney/ wallet watcher
-  pipeline/    token registry (refresh scheduling) + recorder (SQLite batching)
-  storage/     SQLite schema
-  filters/ scoring/ alerts/ backtest/ execution/   ← later phases
-scripts/       smoke test, telegram login
-test/          unit tests (vitest)
-```
-
-## Known limitations / verify on first run
-- Response fixtures in `test/fixtures` were built by hand from documented shapes, because the build
-  sandbox couldn't reach the APIs. `npm run smoke` checks the real shapes. If it fails,
-  that's the first thing to fix.
-- pump.fun appends fields to its event layouts over time. The decoder reads the stable
-  prefix and ignores the rest. If smoke reports "0 decoded events", check
-  `github.com/pump-fun/pump-public-docs`.
-- Not confirmed by research: the Meteora DBC and DAMM v1 program IDs, and the exact
-  instruction log names for LaunchLab/DBC (see `src/ingest/onchain/programs.ts`).
+## Known limitations
+- Fixtures were hand-built from documented API shapes (the build sandbox couldn't reach
+  the APIs). `npm run smoke` checks the real ones; if it fails, fix that first.
+- The on-chain bundler, sniper and dev numbers only exist for launches the bot saw live. For older
+  tokens it relies on GMGN.
+- After migration, prices come from DexScreener (about 5 s polling for open signals), so exits on
+  migrated tokens react more slowly than on the curve.
+- Unconfirmed program IDs and log markers (Meteora DBC/DAMM v1, LaunchLab) are flagged in
+  `src/ingest/onchain/programs.ts`.

@@ -16,14 +16,138 @@
     "rpcReqPerSec": 8,
     "dasReqPerSec": 1.5,
     "poolTxFetchDelayMs": 1500,
-    "venues": ["pumpfun", "pumpswap", "raydium_cpmm", "raydium_launchlab", "meteora_damm_v2", "meteora_dbc"]
+    "venues": [
+      "pumpfun",
+      "pumpswap",
+      "raydium_cpmm",
+      "raydium_launchlab",
+      "meteora_damm_v2",
+      "meteora_dbc"
+    ]
   },
   "social": {
-    "subreddits": ["solana", "CryptoMoonShots", "SolanaMemeCoins"],
+    "subreddits": [
+      "solana",
+      "CryptoMoonShots",
+      "SolanaMemeCoins"
+    ],
     "redditPollSec": 60,
     "xPollSec": 120,
     "xMaxReadsPerDay": 2000,
-    "velocityWindowsSec": [300, 3600]
+    "velocityWindowsSec": [
+      300,
+      3600
+    ]
   },
-  "programs": {}
+  "programs": {},
+  "filters": {
+    "requireMintRevoked": true,
+    "requireFreezeRevoked": true,
+    "rejectDangerousExtensions": true,
+    "maxTaxPct": 5,
+    "maxTop10Pct": 30,
+    "maxBundlerPct": 20,
+    "maxPhishingPct": 10,
+    "maxInsiderPct": 10,
+    "maxSniperPct": 10,
+    "maxSniperCount": 25,
+    "sniperWindowSlots": 3,
+    "maxDevHoldPct": 10,
+    "maxDevTeamHoldPct": 15,
+    "maxRugRatio": 0.1,
+    "maxCreatorLaunches24h": 3,
+    "serialFarmMinLaunches": 30,
+    "serialFarmMaxGradRate": 0.03,
+    "minLpBurnedOrLockedPct": 90,
+    "minLiquidityUsd": 8000,
+    "minCurveSol": 5,
+    "minAgeSec": 60,
+    "minHolders": 30,
+    "maxTxPerTrader": 6,
+    "maxVolumeToLiquidity1h": 15,
+    "maxRugcheckScore": 60,
+    "requireSellSim": true,
+    "maxSellLossPct": 15,
+    "sellSimSizeSol": 0.5,
+    "requireSocials": true,
+    "rejectRecycledSocials": true
+  },
+  "scoring": {
+    "weights": {
+      "buyPressure": 15,
+      "buyerVelocity": 15,
+      "volumeMomentum": 10,
+      "holderGrowth": 10,
+      "liquidityGrowth": 10,
+      "smartMoney": 15,
+      "social": 10,
+      "distribution": 10,
+      "devQuality": 5
+    },
+    "buyerVelocityTarget5m": 60,
+    "holdersPerMinTarget": 8,
+    "minScoreSnipe": 65,
+    "minScoreScalp": 70
+  },
+  "strategy": {
+    "evalIntervalSec": 5,
+    "deepCheckTtlSec": 60,
+    "deepCheckConcurrency": 2,
+    "recheckRejectedAfterSec": 300,
+    "snipe": {
+      "maxAgeSec": 900,
+      "minUniqueBuyers": 25,
+      "minCurveProgress": 0.12,
+      "maxCurveProgress": 0.85,
+      "minBuySellRatio2m": 1.2
+    },
+    "scalp": {
+      "minAgeSec": 900,
+      "minLiquidityUsd": 15000,
+      "min5mVolumeUsd": 5000,
+      "volumeBreakoutX": 2.5,
+      "minPriceChange5mPct": 3,
+      "maxPriceChange5mPct": 40,
+      "minBuySellRatio5m": 1.3,
+      "cooldownSec": 3600
+    },
+    "entry": {
+      "maxChasePct": 15
+    },
+    "exit": {
+      "stopLossPct": 30,
+      "tp1Multiple": 2,
+      "tp1SellPct": 50,
+      "tp2Multiple": 3,
+      "tp2SellPct": 25,
+      "trailingStopPct": 30,
+      "timeStopMin": 30,
+      "timeStopMinGainPct": 20,
+      "migrationSellPct": 50,
+      "devSellPct": 20,
+      "liquidityDropPct": 30,
+      "sellPressureRatio": 3,
+      "sellPressureDrawdownPct": 25,
+      "bundleExodusPct": 30,
+      "maxHoldHours": 24
+    },
+    "paper": {
+      "positionSol": 0.5,
+      "slippagePct": 3,
+      "venueFeePct": 1.25,
+      "priorityFeeSol": 0.0005,
+      "jitoTipSol": 0.0005,
+      "latencyMs": 1500
+    },
+    "outcomeCheckpointsMin": [
+      1,
+      5,
+      15,
+      60,
+      1440
+    ]
+  },
+  "alerts": {
+    "minScore": 65
+  }
 }

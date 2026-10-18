@@ -1,0 +1,17 @@
+{
+  "is_honeypot": "",
+  "renounced_mint": true,
+  "renounced_freeze_account": true,
+  "buy_tax": "0.0125",
+  "sell_tax": "0.0125",
+  "top_10_holder_rate": "0.2116",
+  "dev_team_hold_rate": "0",
+  "creator_balance_rate": "0",
+  "creator_token_status": "creator_close",
+  "rug_ratio": "0.02",
+  "is_wash_trading": false,
+  "rat_trader_amount_rate": "0",
+  "bundler_trader_amount_rate": "0.3175",
+  "sniper_count": 0,
+  "burn_status": ""
+}

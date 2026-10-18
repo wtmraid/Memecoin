@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { z } from 'zod';
 import 'dotenv/config';
+import { AlertsSchema, FiltersSchema, ScoringSchema, StrategySchema } from './strategy.js';
 
 const bool = (def: boolean) =>
   z
@@ -54,6 +55,18 @@ export const EnvSchema = z.object({
   KOL_X_HANDLES: csv,
   TELEGRAM_CHANNELS: csv,
   TELEGRAM_KOL_CHANNELS: csv,
+
+  /** GMGN OpenAPI key (gmgn.ai/ai). Source of the GMGN "Core Metrics". */
+  GMGN_API_KEY: z.string().optional(),
+  /** Jupiter Developer Platform key (developers.jup.ag) for the sell simulation. */
+  JUPITER_API_KEY: z.string().optional(),
+  ENABLE_RUGCHECK: bool(true),
+
+  ENABLE_SIGNALS: bool(true),
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  /** Chat that receives alerts and is allowed to send /scan commands. */
+  TELEGRAM_ALERT_CHAT_ID: z.string().optional(),
+  DISCORD_WEBHOOK_URL: z.string().url().optional(),
 });
 export type Env = z.infer<typeof EnvSchema>;
 
@@ -109,6 +122,10 @@ export const SettingsSchema = z.object({
     velocityWindowsSec: z.array(z.number().positive()).default([300, 3600]),
   }),
   programs: z.record(z.string()).default({}),
+  filters: FiltersSchema.default({}),
+  scoring: ScoringSchema.default({}),
+  strategy: StrategySchema.default({}),
+  alerts: AlertsSchema.default({}),
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 

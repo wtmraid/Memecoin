@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import type { Signal, SignalUpdate } from '../strategy/types.js';
+import type { ClosedOutcome } from '../strategy/positions.js';
 import type {
   HolderStats,
   MarketSnapshot,
@@ -60,6 +62,19 @@ CREATE TABLE IF NOT EXISTS mentions (
   PRIMARY KEY (source, id)
 );
 CREATE INDEX IF NOT EXISTS mentions_ts ON mentions(ts_ms);
+CREATE TABLE IF NOT EXISTS signals (
+  id TEXT PRIMARY KEY, mint TEXT NOT NULL, symbol TEXT, mode TEXT NOT NULL, score INTEGER NOT NULL,
+  coverage REAL, ts_ms INTEGER NOT NULL, entry_price_sol REAL, entry_mcap_usd REAL,
+  age_sec REAL, curve_progress REAL, features_json TEXT, facts_json TEXT, filters_json TEXT,
+  -- outcome (written once the 24h tracking window ends; no lookahead)
+  p1m REAL, p5m REAL, p15m REAL, p1h REAL, p24h REAL,
+  max_multiple REAL, max_drawdown_pct REAL, rugged INTEGER, paper_pnl_pct REAL, closed_ms INTEGER, outcome_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS signals_ts ON signals(ts_ms);
+CREATE TABLE IF NOT EXISTS signal_updates (
+  signal_id TEXT NOT NULL, ts_ms INTEGER NOT NULL, kind TEXT NOT NULL, sell_pct REAL, remaining_pct REAL,
+  price_sol REAL, multiple REAL, pnl_pct REAL, reason TEXT
+);
 CREATE TABLE IF NOT EXISTS wallet_trades (
   signature TEXT NOT NULL, wallet TEXT NOT NULL, mint TEXT NOT NULL, side TEXT NOT NULL,
   token_delta TEXT, sol_delta TEXT, slot INTEGER, ts_ms INTEGER NOT NULL,
@@ -99,6 +114,10 @@ export class Store {
       mention: p(`INSERT OR IGNORE INTO mentions VALUES (?,?,?,?,?,?,?,?,?,?)`),
       wallet: p(`INSERT OR IGNORE INTO wallet_trades VALUES (?,?,?,?,?,?,?,?)`),
       getToken: p(`SELECT * FROM tokens WHERE mint=?`),
+      signal: p(`INSERT OR IGNORE INTO signals (id,mint,symbol,mode,score,coverage,ts_ms,entry_price_sol,entry_mcap_usd,age_sec,curve_progress,features_json,facts_json,filters_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`),
+      update: p(`INSERT INTO signal_updates VALUES (?,?,?,?,?,?,?,?,?)`),
+      outcome: p(`UPDATE signals SET p1m=?,p5m=?,p15m=?,p1h=?,p24h=?,max_multiple=?,max_drawdown_pct=?,rugged=?,paper_pnl_pct=?,closed_ms=?,outcome_ms=? WHERE id=?`),
     };
   }
 
@@ -156,6 +175,24 @@ export class Store {
   }
   insertWalletTrade(t: WalletTrade) {
     this.stmts.wallet.run(t.signature, t.wallet, t.mint, t.side, big(t.tokenDelta), big(t.solDeltaLamports), t.slot, t.ts);
+  }
+  insertSignal(s: Signal) {
+    const replacer = (_k: string, v: unknown) => (typeof v === 'bigint' ? v.toString() : v);
+    this.stmts.signal.run(
+      s.id, s.mint, s.facts.symbol ?? null, s.mode, s.score.score, s.score.coverage, s.ts, s.plan.entryPrice,
+      s.facts.mcapUsd, s.facts.ageSec, s.facts.curveProgress, JSON.stringify(s.score.features),
+      JSON.stringify(s.facts, replacer), JSON.stringify(s.filters.results),
+    );
+  }
+  insertSignalUpdate(u: SignalUpdate) {
+    this.stmts.update.run(u.signalId, u.ts, u.kind, u.sellPct, u.remainingPct, u.price, u.multiple, u.pnlPct, u.reason);
+  }
+  writeOutcome(o: ClosedOutcome, ts = Date.now()) {
+    const c = o.checkpoints;
+    this.stmts.outcome.run(
+      c[1] ?? null, c[5] ?? null, c[15] ?? null, c[60] ?? null, c[1440] ?? null,
+      o.maxMultiple, o.maxDrawdownPct, o.rugged ? 1 : 0, o.pnlPct, o.closedTs, ts, o.signalId,
+    );
   }
   getToken(mint: string): Record<string, unknown> | undefined {
     return this.stmts.getToken.get(mint) as Record<string, unknown> | undefined;

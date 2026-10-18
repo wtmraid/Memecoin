@@ -19,6 +19,15 @@ import { SmartWalletWatcher } from './ingest/smartmoney/wallets.js';
 import { Recorder } from './pipeline/recorder.js';
 import { TokenRegistry } from './pipeline/registry.js';
 import { Store } from './storage/db.js';
+import { TradeBooks } from './analysis/tradeBook.js';
+import { GmgnClient } from './safety/gmgn.js';
+import { JupiterSellSim } from './safety/jupiter.js';
+import { fetchMintInfo } from './safety/mintInfo.js';
+import { RugcheckClient } from './safety/rugcheck.js';
+import { Evaluator } from './strategy/evaluator.js';
+import { PositionMonitor } from './strategy/positions.js';
+import { TelegramBot } from './alerts/telegram.js';
+import { AlertService } from './alerts/service.js';
 
 const perMin = (n: number) => new TokenBucket(n / 60, Math.max(1, Math.floor(n / 10)));
 
@@ -27,6 +36,8 @@ export interface App {
   store: Store;
   registry: TokenRegistry;
   mentions: MentionTracker;
+  evaluator: Evaluator | null;
+  positions: PositionMonitor | null;
   stop(): Promise<void>;
 }
 
@@ -180,6 +191,59 @@ export async function startApp(cfg: AppConfig, log: Logger): Promise<App> {
     stops.push(stopTg);
   }
 
+  // --- Phase 2+3: safety filters, scoring, signals, sell recommendations
+  let evaluator: Evaluator | null = null;
+  let positions: PositionMonitor | null = null;
+  if (env.ENABLE_SIGNALS) {
+    const books = new TradeBooks();
+    bus.on('token.created', (c) => books.onCreate(c));
+    bus.on('pumpfun.trade', (t) => books.onTrade(t));
+    if (!env.ENABLE_PUMPFUN_TRADES) log.warn('ENABLE_PUMPFUN_TRADES=false: bundler/sniper/dev metrics and SNIPE momentum need pump.fun trades');
+    if (!env.GMGN_API_KEY) log.warn('GMGN_API_KEY not set: Core Metrics fall back to on-chain estimates (insiders/phishing/rug ratio unavailable)');
+    if (!env.JUPITER_API_KEY) log.warn('JUPITER_API_KEY not set: sell simulation runs keyless at 0.5 rps');
+
+    evaluator = new Evaluator(
+      {
+        bus,
+        registry,
+        books,
+        mentions,
+        log,
+        // GMGN free plan: ~5 weight/s, 2 per token (info + security). Stay under it.
+        gmgn: env.GMGN_API_KEY ? new GmgnClient(new HttpClient(new TokenBucket(2, 4)), env.GMGN_API_KEY) : undefined,
+        mintInfo: rpc ? (m) => fetchMintInfo(rpc, m) : undefined,
+        rugcheck: env.ENABLE_RUGCHECK ? new RugcheckClient(new HttpClient(perMin(30))) : undefined,
+        sellSim: new JupiterSellSim(new HttpClient(new TokenBucket(env.JUPITER_API_KEY ? 0.9 : 0.45, 1)), env.JUPITER_API_KEY),
+        marketSnapshots: (m) => ds.snapshots(m),
+      },
+      { filters: settings.filters, scoring: settings.scoring, strategy: settings.strategy },
+    );
+    positions = new PositionMonitor(bus, registry, books, evaluator.sol, evaluator.series, settings.strategy, log, {
+      refreshMarket: (m) => ds.snapshots(m),
+      onOutcome: (o) => store.writeOutcome(o),
+    });
+    evaluator.start();
+    positions.start();
+    stops.push(() => evaluator!.stop(), () => positions!.stop());
+
+    const tg =
+      env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_ALERT_CHAT_ID
+        ? { bot: new TelegramBot(new HttpClient(new TokenBucket(5, 5)), env.TELEGRAM_BOT_TOKEN, log), chatId: env.TELEGRAM_ALERT_CHAT_ID }
+        : undefined;
+    if (!tg) log.warn('TELEGRAM_BOT_TOKEN / TELEGRAM_ALERT_CHAT_ID not set: signals are logged and stored but not sent');
+    const alerts = new AlertService(bus, log, {
+      telegram: tg,
+      discord: env.DISCORD_WEBHOOK_URL ? { http: new HttpClient(new TokenBucket(0.4, 2)), webhookUrl: env.DISCORD_WEBHOOK_URL } : undefined,
+      evaluator,
+      positions,
+      minScore: settings.alerts.minScore,
+    });
+    alerts.startCommands();
+    stops.push(() => tg?.bot.stopPolling());
+    bus.on('signal.buy', (sg) => log.info({ mint: sg.mint, sym: sg.facts.symbol, mode: sg.mode, score: sg.score.score }, 'SIGNAL'));
+    bus.on('signal.update', (u) => log.info({ mint: u.mint, kind: u.kind, sell: u.sellPct, x: u.multiple.toFixed(2) }, 'signal update'));
+  }
+
   // --- Health line every minute
   loops.push(
     setInterval(() => {
@@ -191,6 +255,9 @@ export async function startApp(cfg: AppConfig, log: Logger): Promise<App> {
           onchain: onchain?.stats,
           dbWrites: recorder.written,
           mentionKeys: mentions.size,
+          evaluator: evaluator?.stats,
+          openSignals: positions?.positions.size,
+          solUsd: evaluator?.sol.usd ? Math.round(evaluator.sol.usd) : null,
         },
         'health',
       );
@@ -202,6 +269,8 @@ export async function startApp(cfg: AppConfig, log: Logger): Promise<App> {
     store,
     registry,
     mentions,
+    evaluator,
+    positions,
     async stop() {
       loops.forEach(clearInterval);
       for (const s of stops.reverse()) await s();

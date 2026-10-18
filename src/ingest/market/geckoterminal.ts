@@ -48,6 +48,7 @@ export function mapGeckoPool(p: GtPool, now = Date.now()): MarketSnapshot | null
     source: 'geckoterminal',
     pairAddress: a.address,
     dexId: p.relationships?.dex?.data?.id ?? 'unknown',
+    quoteMint: gtMint(p.relationships?.quote_token?.data?.id) ?? undefined,
     priceUsd: num(a.base_token_price_usd),
     priceNative: num(a.base_token_price_native_currency),
     liquidityUsd: num(a.reserve_in_usd),

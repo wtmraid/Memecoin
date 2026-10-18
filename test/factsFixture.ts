@@ -1,0 +1,43 @@
+import { emptyFacts, type TokenFacts } from '../src/filters/facts.js';
+
+/** A token that passes everything with default thresholds. */
+export function cleanFacts(over: Partial<TokenFacts> = {}): TokenFacts {
+  const f = emptyFacts('Mint111', 0);
+  return {
+    ...f,
+    ageSec: 300,
+    onCurve: true,
+    curveProgress: 0.4,
+    curveSol: 20,
+    priceSol: 1e-7,
+    liquidityUsd: 3000,
+    taxPct: 1.25,
+    top10Pct: 18,
+    bundlerPct: 5,
+    phishingPct: 1,
+    insiderPct: 0,
+    sniperPct: 2,
+    sniperCount: 3,
+    devHoldPct: 2,
+    devTeamHoldPct: 3,
+    devMigrated: 4,
+    devLaunches: 10,
+    devGradRate: 0.4,
+    rugRatio: 0.02,
+    creatorLaunches24h: 1,
+    mintRenounced: true,
+    freezeRenounced: true,
+    dangerousExtensions: [],
+    lp: { applies: false, burnedOrLockedPct: null, burned: null },
+    holderCount: 120,
+    txPerTrader: 2,
+    volToLiq1h: 3,
+    isWashTrading: false,
+    rugcheck: { scoreNormalised: 10, dangers: [], warnings: [], lpLockedPct: null },
+    sellSim: { routable: true, roundTripLossPct: 4, sellPriceImpactPct: 1 },
+    socials: { twitter: 'https://x.com/realproj' },
+    socialCheck: { hasAny: true, keys: ['x:realproj'], problems: [] },
+    recycledWith: [],
+    ...over,
+  };
+}

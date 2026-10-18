@@ -46,6 +46,8 @@ export class Recorder {
         for (const mint of m.mints) store.upsertToken({ mint }, `social:${m.source}`, m.ts);
       }),
     );
+    bus.on('signal.buy', (s) => q(() => store.insertSignal(s)));
+    bus.on('signal.update', (u) => q(() => store.insertSignalUpdate(u)));
     bus.on('wallet.trade', (w) =>
       q(() => {
         store.insertWalletTrade(w);

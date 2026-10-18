@@ -96,6 +96,10 @@ export interface MarketSnapshot {
   source: 'dexscreener' | 'geckoterminal' | 'birdeye';
   pairAddress: string;
   dexId: string;
+  symbol?: string;
+  name?: string;
+  /** Quote asset of the pair (priceNative is denominated in it). */
+  quoteMint?: string;
   priceUsd: number | null;
   priceNative: number | null;
   liquidityUsd: number | null;

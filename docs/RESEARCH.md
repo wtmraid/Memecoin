@@ -29,6 +29,34 @@ on it. `npm run smoke` (Phase 1) does exactly that from your own machine/VPS.
 
 ## Details and design decisions
 
+### GMGN OpenAPI (added 2026-10-18) — source of the "Core Metrics"
+- Official API documented in github.com/GMGNAI/gmgn-skills (and the `gmgn-cli` npm
+  package, v1.6.7, whose client source was read to confirm the details below).
+- Base `https://openapi.gmgn.ai`. Auth: header `X-APIKEY` + query `timestamp` (unix s,
+  server checks ±5 s) + `client_id` (UUID, replays rejected within 7 s). Key from gmgn.ai/ai.
+  Responses are `{code, data, error, message}`; `code ≠ 0` is an error.
+- Rate limit: leaky bucket per plan — Free `5/5`, Plus `20/20`, Pro `50/50` (rate/capacity).
+  `token/info`, `token/security`, `token/pool_info` weigh 1; holders/traders weigh 5.
+  On 429 `RATE_LIMIT_BANNED` with `reset_at`: stop all calls until then — further calls
+  extend the ban (up to 5 min). We stay at ~2 weight/s and go silent until `reset_at`.
+- **IPv4 only** (401/403 over IPv6).
+- Tile ↔ field mapping (GMGN rates are 0–1, tiles show %):
+  | Tile | Field |
+  |---|---|
+  | Taxes | `security.buy_tax` / `sell_tax` |
+  | Top 10 | `info.stat.top_10_holder_rate` |
+  | Bundler | `info.stat.top_bundler_trader_percentage` (fallback `security.bundler_trader_amount_rate`) |
+  | Phishing wallet | `info.stat.top_entrapment_trader_percentage` |
+  | Insiders | `info.stat.top_rat_trader_percentage` (fallback `security.rat_trader_amount_rate`) |
+  | Sniper | `security.sniper_count` (count; % from our on-chain book) |
+  | Dev holdings | `info.stat.creator_hold_rate` |
+  | Dev Migrated | `info.dev.creator_open_count` |
+  | Rug | `security.rug_ratio` (GMGN: <0.10 safe, >0.30 danger) |
+  | ✓ marks | `renounced_mint`, `renounced_freeze_account`, `burn_status`, top 10 |
+- Dev history: `GET /v1/user/created_tokens` → `inner_count` (stuck on curve),
+  `open_count` (graduated), `tokens[]` (≤ ~101 newest).
+- Token page link: `https://gmgn.ai/sol/token/<mint>` (also returned as `link.gmgn`).
+
 ### On-chain streaming: Helius standard WebSockets
 - Helius plans changed **2026-04-07**: Free $0 (1M credits), Developer $49 (10M),
   Business $499 (100M), Professional $999 (200M).
@@ -166,6 +194,7 @@ All IDs live in `src/ingest/onchain/programs.ts` and can be overridden in config
   tip-floor percentile, not the minimum.
 
 ## Sources
+- GMGN: https://github.com/GMGNAI/gmgn-skills (skills/gmgn-token/SKILL.md, docs/cli-usage.md) · npm `gmgn-cli` 1.6.7 · https://gmgn.ai/ai
 - Helius plans: https://www.helius.dev/docs/billing/plans · rate limits: https://www.helius.dev/docs/billing/rate-limits · logsSubscribe: https://www.helius.dev/docs/api-reference/rpc/websocket/logssubscribe.md · transactionSubscribe: https://www.helius.dev/docs/rpc/websocket/transaction-subscribe
 - DexScreener (community docs): https://github.com/opensvm/dexscreener-mcp-server · https://claudeskills.info/skills/agiprolabs/claude-trading-skills/dexscreener-api/
 - GeckoTerminal: https://docs.coingecko.com/docs/keyless-public-api.md · https://apiguide.geckoterminal.com/changelogs

@@ -45,3 +45,7 @@ the next one starts. Live trading code does not exist until Phase 5 is requested
    priority fee + Jito tip + latency), outcome tracker (+1m…+24h, MDD, rug flag),
    reports per mode/score bucket, walk-forward tuner.
 5. **Live execution** — only on request.
+
+## Status (2026-10-18)
+Phases 1–3 built, Phase 4's paper trading / outcome logging / report built (tuner pending
+until there is logged data). Alerts reference GMGN only, per the user's preference.
