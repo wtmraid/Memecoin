@@ -137,7 +137,10 @@ export interface AppConfig {
 }
 
 export function loadConfig(envSrc: NodeJS.ProcessEnv = process.env): AppConfig {
-  const env = EnvSchema.parse(envSrc);
+  // Hosting dashboards (e.g. Railway) save untouched variables as empty strings.
+  // Treat "" as "not set" so an empty optional value can't crash startup.
+  const cleaned = Object.fromEntries(Object.entries(envSrc).filter(([, v]) => v !== undefined && v.trim() !== ''));
+  const env = EnvSchema.parse(cleaned);
   const path = resolve(env.CONFIG_PATH);
   const raw = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
   const settings = SettingsSchema.parse({ ingest: {}, social: {}, ...raw });
