@@ -11,7 +11,7 @@ import { Evaluator } from '../src/strategy/evaluator.js';
 import { PositionMonitor } from '../src/strategy/positions.js';
 import { formatScan, formatSignal, formatUpdate, toPlain } from '../src/alerts/format.js';
 import { TelegramBot } from '../src/alerts/telegram.js';
-import { AlertService } from '../src/alerts/service.js';
+import { AlertService, startChatIdHelper } from '../src/alerts/service.js';
 import type { PumpTrade } from '../src/core/types.js';
 import type { Signal, SignalUpdate } from '../src/strategy/types.js';
 import { key, silent } from './helpers.js';
@@ -226,5 +226,52 @@ describe('Telegram delivery', () => {
         : new Response(JSON.stringify({ ok: true, result: { message_id: 5 } }), { status: 200 }),
     );
     expect(await new TelegramBot(http, 'T', silent, 0).send('1', 'hi')).toBe(5);
+  });
+});
+
+describe('Telegram commands', () => {
+  /** Fake Bot API: one incoming message, then empty polls; records sendMessage bodies. */
+  function fakeApi(text: string, chatId = 42) {
+    const sent: any[] = [];
+    let delivered = false;
+    const http = new HttpClient(new TokenBucket(1000, 1000), async (url, init) => {
+      if (url.endsWith('/getUpdates')) {
+        const result = delivered ? [] : [{ update_id: 1, message: { message_id: 7, chat: { id: chatId }, text } }];
+        delivered = true;
+        if (!result.length) await new Promise((r) => setTimeout(r, 20));
+        return new Response(JSON.stringify({ ok: true, result }), { status: 200 });
+      }
+      sent.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 99 } }), { status: 200 });
+    });
+    return { http, sent };
+  }
+
+  it('/status replies with the status text in the alert chat only', async () => {
+    const { http, sent } = fakeApi('/status');
+    const bot = new TelegramBot(http, 'T', silent, 0);
+    const svc = new AlertService(new EventBus(), silent, { telegram: { bot, chatId: '42' }, status: () => 'ALL GOOD', minScore: 0 });
+    svc.startCommands();
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    bot.stopPolling();
+    expect(sent[0]).toMatchObject({ chat_id: '42', text: 'ALL GOOD', reply_parameters: { message_id: 7 } });
+  });
+
+  it('ignores commands from other chats', async () => {
+    const { http, sent } = fakeApi('/status', 666);
+    const bot = new TelegramBot(http, 'T', silent, 0);
+    new AlertService(new EventBus(), silent, { telegram: { bot, chatId: '42' }, status: () => 'x', minScore: 0 }).startCommands();
+    await new Promise((r) => setTimeout(r, 80));
+    bot.stopPolling();
+    expect(sent).toHaveLength(0);
+  });
+
+  it('setup mode tells you your chat id', async () => {
+    const { http, sent } = fakeApi('hi', 123456);
+    const bot = new TelegramBot(http, 'T', silent, 0);
+    startChatIdHelper(bot);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    bot.stopPolling();
+    expect(sent[0].text).toContain('TELEGRAM_ALERT_CHAT_ID=123456');
   });
 });

@@ -77,9 +77,10 @@ export class TelegramBot {
 
   /**
    * Long-poll for messages from `allowedChatId` only (anyone else is ignored).
+   * `null` = setup mode: every chat is passed through (used only to tell the owner their chat id).
    * Calls `onText(text, chatId, messageId)`.
    */
-  startPolling(allowedChatId: string, onText: (text: string, chatId: string, messageId: number) => void) {
+  startPolling(allowedChatId: string | null, onText: (text: string, chatId: string, messageId: number) => void) {
     this.polling = true;
     const loop = async () => {
       while (this.polling) {
@@ -92,7 +93,7 @@ export class TelegramBot {
           for (const u of r.result ?? []) {
             this.offset = u.update_id + 1;
             const m = u.message;
-            if (m?.text && String(m.chat.id) === allowedChatId) onText(m.text, String(m.chat.id), m.message_id);
+            if (m?.text && (allowedChatId === null || String(m.chat.id) === allowedChatId)) onText(m.text, String(m.chat.id), m.message_id);
           }
         } catch (err) {
           this.log.debug({ err: String(err).slice(0, 200) }, 'telegram poll error');

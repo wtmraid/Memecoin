@@ -12,6 +12,7 @@ The only link in alerts is the token's **GMGN page**.
 > signal, not financial advice**. Paper-trade it (it does this automatically) and check
 > `npm run report` before you put real money behind it.
 
+- **Run it 24/7 from your phone: [docs/DEPLOY.md](docs/DEPLOY.md)**
 - Plan & architecture: [docs/PLAN.md](docs/PLAN.md) · API research: [docs/RESEARCH.md](docs/RESEARCH.md)
 
 ## What an alert looks like
@@ -110,7 +111,7 @@ npm start               # run the scanner 24/7
 - Alerts and sell updates arrive in `TELEGRAM_ALERT_CHAT_ID`.
 - **Paste any CA** (or `/scan <CA>`) in that chat to get a full scan with the same layout and a
   verdict: `✅ ENTRY`, `⏳ SAFE SO FAR, NO ENTRY YET`, `⚠️ WEAK MOMENTUM` or `❌ REJECT` with reasons.
-- `/open` lists the signals being tracked.
+- `/open` lists the signals being tracked; `/status` shows whether everything is connected.
 - Following a signal channel (like a pump.fun volume-signal group)? Put its username in
   `TELEGRAM_CHANNELS` and `TELEGRAM_KOL_CHANNELS` with `ENABLE_TELEGRAM=true`. Its calls then count
   toward the social score and pull those tokens into the scanner.

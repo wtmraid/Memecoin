@@ -14,6 +14,9 @@ COPY package.json tsconfig.json ./
 COPY src ./src
 COPY scripts ./scripts
 COPY config ./config
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN mkdir -p /app/data && chown -R node:node /app
-USER node
-CMD ["npx", "tsx", "src/index.ts"]
+ENV DB_PATH=/app/data/scanner.db
+# Starts as root only to fix volume ownership, then runs the bot as `node`.
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["node", "--import", "tsx", "src/index.ts"]

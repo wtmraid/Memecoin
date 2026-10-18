@@ -24,6 +24,8 @@ export class AlertService {
       discord?: { http: HttpClient; webhookUrl: string };
       evaluator?: Evaluator;
       positions?: PositionMonitor;
+      /** Text for /status. */
+      status?: () => string;
       minScore: number;
     },
   ) {
@@ -47,6 +49,12 @@ export class AlertService {
     return id;
   }
 
+  /** "Bot is online" message, so you know a (re)start worked. */
+  announce(html: string) {
+    const tg = this.opts.telegram;
+    if (tg) void tg.bot.send(tg.chatId, html);
+  }
+
   /** Commands: paste a CA (or `/scan <CA>`) → full scan; `/open` → tracked signals. */
   startCommands() {
     const tg = this.opts.telegram;
@@ -54,7 +62,11 @@ export class AlertService {
     tg.bot.startPolling(tg.chatId, (text, chatId, msgId) => {
       const t = text.trim();
       if (/^\/(help|start)\b/.test(t)) {
-        void tg.bot.send(chatId, 'Paste a token CA (or <code>/scan CA</code>) for a full safety scan.\n<code>/open</code> lists signals being tracked.', { replyTo: msgId });
+        void tg.bot.send(chatId, HELP, { replyTo: msgId });
+        return;
+      }
+      if (/^\/status\b/.test(t)) {
+        void tg.bot.send(chatId, this.opts.status?.() ?? 'running', { replyTo: msgId });
         return;
       }
       if (/^\/open\b/.test(t)) {
@@ -70,4 +82,19 @@ export class AlertService {
         .catch((err) => tg.bot.send(chatId, `Scan failed: ${String(err).slice(0, 200)}`, { replyTo: msgId }));
     });
   }
+}
+
+export const HELP = [
+  '<b>Memecoin scanner</b>',
+  '• Paste any token CA (or <code>/scan CA</code>) → full safety scan + verdict',
+  '• <code>/status</code> → is the bot healthy, what it is watching',
+  '• <code>/open</code> → signals being tracked (sell updates arrive as replies to each alert)',
+  '<i>Rule-based signals, not financial advice.</i>',
+].join('\n');
+
+/** Setup helper: before TELEGRAM_ALERT_CHAT_ID is set, answer any message with its chat id. */
+export function startChatIdHelper(bot: TelegramBot) {
+  bot.startPolling(null, (_text, chatId, msgId) => {
+    void bot.send(chatId, `👋 Your chat id is <code>${chatId}</code>\nSet <code>TELEGRAM_ALERT_CHAT_ID=${chatId}</code> and restart the bot.`, { replyTo: msgId });
+  });
 }
