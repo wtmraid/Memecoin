@@ -20,7 +20,7 @@
     "start": "tsx src/index.ts"
   },
   "dependencies": {
-    "@solana/web3.js": "^1.99.0",
+    "@noble/curves": "^1.9.7",
     "better-sqlite3": "^12.11.1",
     "bs58": "^6.0.0",
     "dotenv": "^16.6.1",

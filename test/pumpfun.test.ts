@@ -153,6 +153,12 @@ describe('bonding curve', () => {
     expect(c.progress).toBeCloseTo((793.1 - 720) / 793.1);
   });
 
+  it('PDA matches @solana/web3.js reference vectors', () => {
+    // Expected values computed with PublicKey.findProgramAddressSync (500/500 matched before removal).
+    expect(bondingCurvePda('F9o96s2nd69AkBbHJMCXE5tZueum6iYrKuQGhNd5a3Xb', PUMP)).toBe('Fzapd4emkpV7sArktWhsgyHiGsagnsDRtvZkcgeNXc1J');
+    expect(bondingCurvePda('3bjpM7Kd2pDqiocuDp6phEQDLsin62jdDSTNPzAHXijF', PUMP)).toBe('5zA7mw9Excz1v8mhUjqqxTCBYsB85g6ek8EtjqeSTmWi');
+  });
+
   it('derives a deterministic PDA', () => {
     const a = bondingCurvePda(MINT, PUMP);
     expect(a).toBe(bondingCurvePda(MINT, PUMP));

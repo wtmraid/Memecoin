@@ -1,14 +1,11 @@
-import { PublicKey } from '@solana/web3.js';
+import bs58 from 'bs58';
+import { findProgramAddress } from './pda.js';
 import { BorshReader } from './borsh.js';
 import { curvePriceSol, curveProgress } from './pumpfun.js';
 import type { BondingCurveState } from '../../core/types.js';
 
 export function bondingCurvePda(mint: string, programId: string): string {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from('bonding-curve'), new PublicKey(mint).toBuffer()],
-    new PublicKey(programId),
-  );
-  return pda.toBase58();
+  return findProgramAddress([Buffer.from('bonding-curve'), bs58.decode(mint)], programId)[0];
 }
 
 /**
