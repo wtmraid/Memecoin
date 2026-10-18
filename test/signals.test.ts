@@ -325,3 +325,35 @@ describe('entry realism, shadows and pre-warming', () => {
     expect(w.ev.stats.prewarms).toBe(1);
   });
 });
+
+describe('socials without GMGN', () => {
+  function noGmgnWorld(meta: object | null) {
+    let now = 1_000_000;
+    const bus = new EventBus();
+    const registry = new TokenRegistry(bus, { marketSnapshots: async () => new Map() }, silent, regOpts, () => now);
+    const ev = new Evaluator(
+      { bus, registry, books: new TradeBooks(), mentions: new MentionTracker(), log: silent, metadataSocials: async () => meta, now: () => now },
+      { filters: FiltersSchema.parse({}), scoring: ScoringSchema.parse({}), strategy: StrategySchema.parse({}) },
+    );
+    bus.emit('token.created', { mint: MINT, name: 'R', symbol: 'R', uri: 'https://ipfs.io/ipfs/Qm1', bondingCurve: key(79), creator: DEV, venue: 'pumpfun', signature: 'c', slot: 1, ts: now });
+    // DexScreener knows the pair but there is no paid profile → no socials there
+    registry.tokens.get(MINT)!.market = { mint: MINT, source: 'dexscreener', pairAddress: 'p', dexId: 'pumpfun', priceUsd: 1, priceNative: 1, liquidityUsd: 1, fdvUsd: 1, marketCapUsd: 1, volumeUsd: { m5: 0, h1: 0, h6: 0, h24: 0 }, buys: { m5: 0, h1: 0, h6: 0, h24: 0 }, sells: { m5: 0, h1: 0, h6: 0, h24: 0 }, priceChangePct: { m5: 0, h1: 0, h6: 0, h24: 0 }, pairCreatedAt: now, websites: [], socials: [], ts: now };
+    return ev;
+  }
+
+  it('uses the socials from the token metadata (what pump.fun shows)', async () => {
+    const e = await noGmgnWorld({ twitter: 'https://x.com/realcoin' }).evaluate(MINT, { deep: true });
+    expect(e.facts.socials.twitter).toBe('https://x.com/realcoin');
+    expect(e.filters.results.find((r) => r.id === 'socials')!.status).toBe('pass');
+  });
+
+  it('a missing paid DexScreener profile alone never counts as "no socials"', async () => {
+    const e = await noGmgnWorld(null).evaluate(MINT, { deep: true });
+    expect(e.filters.results.find((r) => r.id === 'socials')!.status).toBe('unknown');
+  });
+
+  it('metadata with no socials at all is a real "no socials" reject', async () => {
+    const e = await noGmgnWorld({ name: 'R' }).evaluate(MINT, { deep: true });
+    expect(e.filters.results.find((r) => r.id === 'socials')!.reason).toMatch(/no X/);
+  });
+});

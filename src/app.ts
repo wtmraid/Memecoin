@@ -24,6 +24,7 @@ import { GmgnClient } from './safety/gmgn.js';
 import { JupiterSellSim } from './safety/jupiter.js';
 import { fetchMintInfo } from './safety/mintInfo.js';
 import { makeClusterAnalyzer } from './safety/clusters.js';
+import { fetchMetadataSocials } from './safety/metadata.js';
 import { RugcheckClient } from './safety/rugcheck.js';
 import { Evaluator } from './strategy/evaluator.js';
 import { PositionMonitor } from './strategy/positions.js';
@@ -216,6 +217,10 @@ export async function startApp(cfg: AppConfig, log: Logger): Promise<App> {
         rugcheck: env.ENABLE_RUGCHECK ? new RugcheckClient(new HttpClient(perMin(30))) : undefined,
         sellSim: new JupiterSellSim(new HttpClient(new TokenBucket(env.JUPITER_API_KEY ? 0.9 : 0.45, 1)), env.JUPITER_API_KEY),
         marketSnapshots: (m) => ds.snapshots(m),
+        metadataSocials: (() => {
+          const http = new HttpClient(new TokenBucket(5, 5));
+          return (uri: string) => fetchMetadataSocials(http, uri);
+        })(),
         clusters: rpc
           ? makeClusterAnalyzer(rpc, (m) => fetchHolderStats(rpc, m, { maxPages: 1, useDas: false }), {
               maxHolders: settings.filters.clusterMaxHolders,
@@ -270,6 +275,7 @@ export async function startApp(cfg: AppConfig, log: Logger): Promise<App> {
         `${yes(env.GMGN_API_KEY)} GMGN · ${yes(env.JUPITER_API_KEY)} Jupiter key · ${yes(env.ENABLE_RUGCHECK)} RugCheck`,
         `${yes(evaluator!.sol.usd)} SOL price ${evaluator!.sol.usd ? `$${evaluator!.sol.usd.toFixed(0)}` : 'n/a'}`,
         `Watching <b>${registry.tokens.size}</b> tokens · deep-checked ${st.deepChecks} · rejected ${st.rejected}`,
+        `Top reject reasons: ${evaluator!.topRejectReasons() || 'none yet'}`,
         `Signals sent <b>${st.signals}</b> · open ${positions!.openCount} · learning from ${positions!.shadowCount} silent near-misses`,
       ].join('\n');
     };

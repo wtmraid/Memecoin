@@ -197,3 +197,25 @@ describe('socials', () => {
     expect(idx.record('C', ['x:scam'], 8 * 86_400_000)).toEqual([]);
   });
 });
+
+import { ipfsToHttps, socialsFromMetadata } from '../src/safety/metadata.js';
+
+describe('token metadata socials (pump.fun)', () => {
+  it('reads twitter/telegram/website from the metadata JSON, normalising handles', () => {
+    expect(socialsFromMetadata({ name: 'X', twitter: 'https://x.com/realcoin', telegram: '@realcoinchat', website: 'https://real.fun' })).toEqual({
+      twitter: 'https://x.com/realcoin',
+      telegram: 'https://t.me/realcoinchat',
+      website: 'https://real.fun',
+    });
+    expect(socialsFromMetadata({ extensions: { twitter: 'realcoin' } })).toEqual({ twitter: 'https://x.com/realcoin' });
+    expect(socialsFromMetadata({ twitter: 42, telegram: '' })).toEqual({});
+    expect(socialsFromMetadata('junk')).toEqual({});
+  });
+  it('maps ipfs:// and arweave URIs to https and refuses others', () => {
+    expect(ipfsToHttps('ipfs://Qm123')).toBe('https://ipfs.io/ipfs/Qm123');
+    expect(ipfsToHttps('https://ipfs.io/ipfs/Qm123')).toBe('https://ipfs.io/ipfs/Qm123');
+    expect(ipfsToHttps('ar://abc')).toBe('https://arweave.net/abc');
+    expect(ipfsToHttps('http://insecure/x')).toBeNull();
+    expect(ipfsToHttps('file:///etc/passwd')).toBeNull();
+  });
+});

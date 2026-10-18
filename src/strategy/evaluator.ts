@@ -26,6 +26,8 @@ export interface DeepData {
   sellSim?: SellSimResult | null;
   devHistory?: { launches: number; migrated: number; gradRate: number | null } | null;
   clusters?: ClusterReport | null;
+  /** Socials from the token's own metadata JSON (what pump.fun shows). */
+  metaSocials?: SocialLinks | null;
 }
 
 export interface EvaluatorDeps {
@@ -40,6 +42,8 @@ export interface EvaluatorDeps {
   sellSim?: JupiterSellSim;
   /** Bubblemaps-style holder clustering (funding links between top holders). */
   clusters?: (mint: string, creator: string | null) => Promise<ClusterReport | null>;
+  /** Fetch socials from a token metadata URI (pump.fun stores X/Telegram/website there). */
+  metadataSocials?: (uri: string) => Promise<SocialLinks | null>;
   /** Random source for shadow sampling (injectable for tests). */
   random?: () => number;
   /** Used by forced scans of tokens we aren't tracking yet. */
@@ -71,7 +75,9 @@ export class Evaluator {
   readonly socialIndex = new SocialIndex();
   readonly creatorLaunches = new WindowCounter(24 * 3600_000);
   readonly smartBuys = new WindowCounter(3600_000);
-  private names = new Map<string, { symbol?: string; name?: string; creator?: string }>();
+  private names = new Map<string, { symbol?: string; name?: string; creator?: string; uri?: string }>();
+  /** Why tokens get rejected (filter id → count), for /status. */
+  readonly rejectReasons = new Map<string, number>();
   private deepCache: TtlCache<DeepData>;
   private devCache = new TtlCache<DeepData['devHistory']>(3600_000);
   private simCache: TtlCache<SellSimResult | null>;
@@ -95,7 +101,7 @@ export class Evaluator {
     this.deepCache = new TtlCache(s.strategy.deepCheckTtlSec * 1000);
     this.simCache = new TtlCache(s.strategy.deepCheckTtlSec * 1000);
     d.bus.on('token.created', (t) => {
-      this.names.set(t.mint, { symbol: t.symbol, name: t.name, creator: t.creator });
+      this.names.set(t.mint, { symbol: t.symbol, name: t.name, creator: t.creator, uri: t.uri });
       this.creatorLaunches.add(t.creator, t.ts);
     });
     d.bus.on('wallet.trade', (w) => w.side === 'buy' && this.smartBuys.add(w.mint, w.ts));
@@ -255,15 +261,18 @@ export class Evaluator {
       f.sellSim = deep.sellSim;
     }
 
-    // Socials: GMGN first, DexScreener profile second
-    const socials: SocialLinks = { ...(g?.socials ?? {}) };
+    // Socials: GMGN first, then the token's own metadata (what pump.fun shows), then a
+    // paid DexScreener profile. "No socials" is only judged from GMGN or metadata — most
+    // launches have no paid DexScreener profile, so its absence there proves nothing.
+    const meta = deep.metaSocials ?? {};
+    const socials: SocialLinks = { ...meta, ...Object.fromEntries(Object.entries(g?.socials ?? {}).filter(([, v]) => v)) };
     for (const s of mkt?.socials ?? []) {
       if ((s.type === 'twitter' || s.type === 'x') && !socials.twitter) socials.twitter = s.url;
       if (s.type === 'telegram' && !socials.telegram) socials.telegram = s.url;
     }
     if (!socials.website && mkt?.websites[0]) socials.website = mkt.websites[0];
     f.socials = socials;
-    if (g || mkt) f.socialCheck = checkSocials(socials);
+    if (g || deep.metaSocials) f.socialCheck = checkSocials(socials);
 
     // Mentions (mint and $TICKER), incl. KOL / caller channels like volume-signal groups
     const keys = [`mint:${mint}`, ...(f.symbol ? [`ticker:${f.symbol.toUpperCase()}`] : [])];
@@ -299,6 +308,10 @@ export class Evaluator {
       out.devHistory = await this.devCache
         .get(creator, () => this.d.gmgn!.devHistory(creator))
         .catch((e) => (this.warn('devHistory', mint, e), null));
+    }
+    const uri = this.names.get(mint)?.uri;
+    if (this.d.metadataSocials && uri && out.metaSocials === undefined) {
+      out.metaSocials = await this.d.metadataSocials(uri).catch((e) => this.warn('metadata', mint, e));
     }
     if (this.d.clusters && out.clusters === undefined) {
       const cl = this.d.clusters;
@@ -409,6 +422,11 @@ export class Evaluator {
     for (const m of prewarm.slice(0, spare)) void this.prewarm(m);
   }
 
+  /** Most common rejection reasons, e.g. "dev_holding 41 · bundler 17 · socials 9". */
+  topRejectReasons(n = 5): string {
+    return [...this.rejectReasons].sort((a, b) => b[1] - a[1]).slice(0, n).map(([k, v]) => `${k} ${v}`).join(' · ');
+  }
+
   private shouldPrewarm(e: Evaluation, now: number): boolean {
     const f = e.facts;
     const s = this.s.strategy;
@@ -438,6 +456,7 @@ export class Evaluator {
   private reject(mint: string, ids: string[], now: number) {
     if (ids.every((id) => TRANSIENT.has(id))) return; // just not mature yet; look again next tick
     this.stats.rejected++;
+    for (const id of ids) if (!TRANSIENT.has(id)) this.rejectReasons.set(id, (this.rejectReasons.get(id) ?? 0) + 1);
     if (ids.some((id) => PERMANENT.has(id))) this.permanent.add(mint);
     else this.rejectedUntil.set(mint, now + this.s.strategy.recheckRejectedAfterSec * 1000);
   }
