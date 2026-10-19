@@ -4,7 +4,8 @@ import type { Logger } from '../core/logger.js';
 import { extractMints } from '../ingest/social/extract.js';
 import type { Evaluator } from '../strategy/evaluator.js';
 import type { PositionMonitor } from '../strategy/positions.js';
-import { formatScan, formatSignal, formatUpdate, toPlain } from './format.js';
+import { formatScan, toPlain } from './format.js';
+import { compactScan, compactSignal, compactUpdate } from './compact.js';
 import type { TelegramBot } from './telegram.js';
 
 /**
@@ -31,12 +32,12 @@ export class AlertService {
   ) {
     bus.on('signal.buy', (s) => {
       if (s.score.score < opts.minScore) return;
-      const html = formatSignal(s);
+      const html = compactSignal(s);
       void this.post(html, s.mint).then((id) => id && this.threads.set(s.id, id));
     });
     bus.on('signal.update', (u) => {
       if (u.shadow) return; // learning-only tracking, never sent
-      void this.post(formatUpdate(u), u.mint, this.threads.get(u.signalId));
+      void this.post(compactUpdate(u), u.mint, this.threads.get(u.signalId));
     });
   }
 
@@ -79,9 +80,11 @@ export class AlertService {
       }
       const mint = extractMints(t)[0];
       if (!mint || !this.opts.evaluator) return;
+      // Short card by default; /full <CA> for every metric.
+      const full = /^\/full\b/.test(t);
       void this.opts.evaluator
         .evaluate(mint, { deep: true, force: true })
-        .then((ev) => tg.bot.send(chatId, formatScan(ev), { replyTo: msgId, gmgnMint: mint }))
+        .then((ev) => tg.bot.send(chatId, full ? formatScan(ev) : compactScan(ev), { replyTo: msgId, gmgnMint: mint }))
         .catch((err) => tg.bot.send(chatId, `Scan failed: ${String(err).slice(0, 200)}`, { replyTo: msgId }));
     });
   }
@@ -89,7 +92,8 @@ export class AlertService {
 
 export const HELP = [
   '<b>Memecoin scanner</b>',
-  '• Paste any token CA (or <code>/scan CA</code>) → full safety scan + verdict',
+  '• Paste any token CA → quick verdict (good entry / not yet / avoid)',
+  '• <code>/full CA</code> → every metric (bundlers, clusters, dev…)',
   '• <code>/status</code> → is the bot healthy, what it is watching',
   '• <code>/open</code> → signals being tracked (sell updates arrive as replies to each alert)',
   '<i>Rule-based signals, not financial advice.</i>',

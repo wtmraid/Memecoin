@@ -357,3 +357,38 @@ describe('socials without GMGN', () => {
     expect(e.filters.results.find((r) => r.id === 'socials')!.reason).toMatch(/no X/);
   });
 });
+
+import { compactScan, compactSignal, compactUpdate } from '../src/alerts/compact.js';
+describe('compact cards', () => {
+  it('alert is short, emoji-led, has buy/sell levels and only a GMGN button', async () => {
+    const w = world({ info: cleanInfo, sec: cleanSec });
+    w.launch();
+    await w.ev.tick();
+    await vi.waitFor(() => expect(w.signals).toHaveLength(1));
+    const html = compactSignal(w.signals[0]!);
+    if (process.env.PREVIEW) console.log('\n' + toPlain(html) + '\n');
+    expect(html.split('\n').length).toBeLessThanOrEqual(16);
+    expect(html).toMatch(/NEW CALL — \$REAL/);
+    expect(html).toMatch(/🟢 Buy: now, up to/);
+    expect(html).toMatch(/🎯 Sell 50% at 2x/);
+    expect(html).toMatch(/🛑 Stop: −30%/);
+    expect(html).toMatch(/🛡 Passed all safety checks/);
+    expect(html).not.toMatch(/Bundler|Phishing|Insiders/); // details live in /full
+    expect(html).not.toMatch(/href=/);
+  });
+
+  it('scan shows a one-word verdict and the main reason to avoid', async () => {
+    const w = world({ info, sec });
+    w.launch();
+    const html = compactScan(await w.ev.evaluate(MINT, { deep: true }));
+    if (process.env.PREVIEW) console.log('\n' + toPlain(html) + '\n');
+    expect(html).toMatch(/^❌ <b>AVOID<\/b> — \$REAL/);
+    expect(html).toMatch(/🚫 bundled supply 31\.75%/);
+  });
+
+  it('sell update is two or three short lines', () => {
+    const html = compactUpdate({ signalId: 's', mint: MINT, symbol: 'REAL', kind: 'emergency', sellPct: 50, remainingPct: 0, price: 1, multiple: 1.42, mcapUsd: 26_000, reason: 'dev sold 100% of their bag', pnlPct: 20, ts: 0 });
+    if (process.env.PREVIEW) console.log('\n' + toPlain(html) + '\n');
+    expect(html).toBe('<b>🚨 SELL ALL NOW</b> · $REAL\ndev sold 100% of their bag\nNow 1.42x · MC $26.0K');
+  });
+});
