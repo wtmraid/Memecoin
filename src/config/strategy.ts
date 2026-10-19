@@ -12,6 +12,11 @@ export const FiltersSchema = z.object({
   rejectDangerousExtensions: z.boolean().default(true),
   maxTaxPct: z.number().default(5),
   maxTop10Pct: z.number().default(30),
+  /**
+   * While on the pump.fun bonding curve the first buyers get tokens cheaply, so the top 10
+   * routinely hold 30–40% in the first minutes (GMGN only calls >50% dangerous).
+   */
+  maxTop10PctCurve: z.number().default(40),
   maxBundlerPct: z.number().default(20),
   maxPhishingPct: z.number().default(10),
   maxInsiderPct: z.number().default(10),

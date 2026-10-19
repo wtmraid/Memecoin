@@ -25,6 +25,8 @@ export interface OnchainStats {
   poolsEmitted: number;
   poolTxMissing: number;
   poolPairUnresolved: number;
+  /** ms timestamp of the last notification from any program stream (0 = none yet). */
+  lastEventAt: number;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -40,6 +42,7 @@ export class OnchainIngestor {
     poolsEmitted: 0,
     poolTxMissing: 0,
     poolPairUnresolved: 0,
+    lastEventAt: 0,
   };
 
   constructor(
@@ -69,6 +72,7 @@ export class OnchainIngestor {
 
   handlePump(n: LogNotification, programId: string) {
     this.stats.notifications++;
+    this.stats.lastEventAt = Date.now();
     for (const ev of decodePumpLogs(n, programId)) {
       this.stats.pumpEvents++;
       switch (ev.kind) {
@@ -90,6 +94,7 @@ export class OnchainIngestor {
 
   async handlePool(n: LogNotification, venue: PoolVenue, programId: string) {
     this.stats.notifications++;
+    this.stats.lastEventAt = Date.now();
     if (!isPoolCreation(n, venue, programId)) return;
     if (!this.seen.add(`pool:${n.signature}`)) return;
     this.stats.poolCandidates++;

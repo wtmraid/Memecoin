@@ -392,3 +392,18 @@ describe('compact cards', () => {
     expect(html).toBe('<b>🚨 SELL ALL NOW</b> · $REAL\ndev sold 100% of their bag\nNow 1.42x · MC $26.0K');
   });
 });
+
+import { formatStatus } from '../src/alerts/compact.js';
+describe('status card', () => {
+  const base = { uptimeMs: 8.6 * 3600_000, streamOn: true, lastEventAgoSec: 2, events: 968_744, gmgn: false, jupiter: true, rugcheck: true, solUsd: 105, watching: 2000, deepChecked: 12, rejected: 554, reasons: [['top10', 449], ['dev_holding', 105]] as [string, number][], sent: 0, open: 0, learning: 2 };
+  it('is spaced out, plain English, and says when the feed last worked', () => {
+    const t = formatStatus(base);
+    if (process.env.PREVIEW) console.log('\n' + toPlain(t) + '\n');
+    expect(t).toContain('✅ Live feed: working (last event 2s ago)');
+    expect(t).toContain('• Top 10 hold too much — 449');
+    expect(t).toContain('\n\n');
+  });
+  it('flags a dead feed with the likely cause', () => {
+    expect(formatStatus({ ...base, lastEventAgoSec: 900 })).toContain('❌ Live feed: no events for 15 min — check Helius credits');
+  });
+});

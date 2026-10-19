@@ -98,7 +98,7 @@ export const FILTERS: FilterDef[] = [
     label: 'Top 10',
     critical: false,
     cheap: true,
-    check: (f, c) => max(f.top10Pct, c.maxTop10Pct, 'top 10 hold', f.sources.top10Pct),
+    check: (f, c) => max(f.top10Pct, f.onCurve ? c.maxTop10PctCurve : c.maxTop10Pct, 'top 10 hold', f.sources.top10Pct),
   },
   {
     id: 'wash_trading',

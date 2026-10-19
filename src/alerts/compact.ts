@@ -107,3 +107,76 @@ export function compactUpdate(u: SignalUpdate): string {
   const result = u.kind === 'closed' ? `Result: <b>${u.pnlPct >= 0 ? '+' : ''}${u.pnlPct.toFixed(0)}%</b> (after fees)` : `Now ${u.multiple.toFixed(2)}x${u.mcapUsd ? ` · MC ${usd(u.mcapUsd)}` : ''}`;
   return [`<b>${HEAD[u.kind](u)}</b> · $${sym}`, esc(u.reason), result].join('\n');
 }
+
+/** Plain-English names for filter ids in /status. */
+const REASON: Record<string, string> = {
+  top10: 'Top 10 hold too much',
+  dev_holding: 'Dev holds too much',
+  bundler: 'Bundled launch',
+  sniper: 'Too many snipers',
+  wash_trading: 'Fake / bot volume',
+  holders: 'Too few holders',
+  liquidity: 'Too little liquidity',
+  mint_authority: 'Dev can mint more',
+  freeze_authority: 'Dev can freeze tokens',
+  token_extensions: 'Dangerous token settings',
+  tax: 'High tax',
+  lp_locked: 'Liquidity not locked',
+  insiders: 'Insiders',
+  phishing: 'Phishing wallets',
+  dev_team: 'Dev team holds too much',
+  dev_history: 'Dev has rugged before',
+  clusters: 'One wallet owns many holders',
+  fresh_wallets: 'Too many fresh wallets',
+  socials: 'No / fake socials',
+  rugcheck: 'RugCheck danger',
+  sell_simulation: "Can't sell (honeypot)",
+};
+
+export interface StatusData {
+  uptimeMs: number;
+  streamOn: boolean;
+  lastEventAgoSec: number | null;
+  events: number;
+  gmgn: boolean;
+  jupiter: boolean;
+  rugcheck: boolean;
+  solUsd: number | null;
+  watching: number;
+  deepChecked: number;
+  rejected: number;
+  reasons: [string, number][];
+  sent: number;
+  open: number;
+  learning: number;
+}
+
+export function formatStatus(d: StatusData): string {
+  const mins = Math.round(d.uptimeMs / 60_000);
+  const up = mins >= 60 ? `${(mins / 60).toFixed(1)}h` : `${mins}m`;
+  const ago = d.lastEventAgoSec;
+  const feed = !d.streamOn
+    ? '⚪ Live feed: off'
+    : ago === null
+      ? '🟡 Live feed: connecting…'
+      : ago < 60
+        ? `✅ Live feed: working (last event ${Math.round(ago)}s ago)`
+        : `❌ Live feed: no events for ${Math.round(ago / 60)} min — check Helius credits`;
+  const ok = (b: boolean) => (b ? '✅' : '❌');
+  return [
+    `<b>📊 Bot status</b> · up ${up}`,
+    '',
+    feed,
+    `🔑 GMGN ${ok(d.gmgn)} · Jupiter ${ok(d.jupiter)} · RugCheck ${ok(d.rugcheck)}`,
+    `💲 SOL ${d.solUsd ? `$${d.solUsd.toFixed(0)}` : '…'}`,
+    '',
+    `👀 Watching <b>${d.watching}</b> coins`,
+    `🔬 Deep-checked ${d.deepChecked} · 🚫 Rejected ${d.rejected}`,
+    ...(d.reasons.length
+      ? ['', '<b>Why coins got rejected:</b>', ...d.reasons.map(([id, n]) => `• ${esc(REASON[id] ?? id)} — ${n}`)]
+      : []),
+    '',
+    `🚨 Calls sent <b>${d.sent}</b> · 📂 Open ${d.open}`,
+    `🧠 Learning from ${d.learning} near-misses`,
+  ].join('\n');
+}

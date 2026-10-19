@@ -64,6 +64,11 @@ describe('edge cases', () => {
   it('high volume/liquidity is NOT wash trading when many holders (busy runner)', () => {
     expect(byId(cleanFacts({ volToLiq1h: 40, holderCount: 900 }), 'wash_trading').status).toBe('pass');
   });
+  it('top 10: up to 40% allowed on the bonding curve, 30% after migration', () => {
+    expect(byId(cleanFacts({ onCurve: true, top10Pct: 36 }), 'top10').status).toBe('pass');
+    expect(byId(cleanFacts({ onCurve: true, top10Pct: 45 }), 'top10').status).toBe('fail');
+    expect(byId(cleanFacts({ onCurve: false, top10Pct: 36 }), 'top10').status).toBe('fail');
+  });
   it('pump.fun curve tokens are exempt from LP lock (nothing to pull)', () => {
     expect(byId(cleanFacts({ lp: { applies: false, burnedOrLockedPct: null, burned: null } }), 'lp_locked').reason).toMatch(/bonding curve/);
   });

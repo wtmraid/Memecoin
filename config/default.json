@@ -46,6 +46,7 @@
     "rejectDangerousExtensions": true,
     "maxTaxPct": 5,
     "maxTop10Pct": 30,
+    "maxTop10PctCurve": 40,
     "maxBundlerPct": 20,
     "maxPhishingPct": 10,
     "maxInsiderPct": 10,

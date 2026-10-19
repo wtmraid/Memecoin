@@ -91,11 +91,13 @@ export class AlertService {
 }
 
 export const HELP = [
-  '<b>Memecoin scanner</b>',
+  '<b>🤖 Memecoin scanner</b>',
+  '',
   '• Paste any token CA → quick verdict (good entry / not yet / avoid)',
   '• <code>/full CA</code> → every metric (bundlers, clusters, dev…)',
   '• <code>/status</code> → is the bot healthy, what it is watching',
   '• <code>/open</code> → signals being tracked (sell updates arrive as replies to each alert)',
+  '',
   '<i>Rule-based signals, not financial advice.</i>',
 ].join('\n');
 

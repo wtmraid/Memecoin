@@ -30,6 +30,7 @@ import { Evaluator } from './strategy/evaluator.js';
 import { PositionMonitor } from './strategy/positions.js';
 import { TelegramBot } from './alerts/telegram.js';
 import { AlertService, HELP, startChatIdHelper } from './alerts/service.js';
+import { formatStatus } from './alerts/compact.js';
 
 const perMin = (n: number) => new TokenBucket(n / 60, Math.max(1, Math.floor(n / 10)));
 
@@ -265,20 +266,24 @@ export async function startApp(cfg: AppConfig, log: Logger): Promise<App> {
       log.warn('Setup mode: message your bot on Telegram and it will reply with your chat id');
     }
     const startedAt = Date.now();
-    const status = () => {
-      const st = evaluator!.stats;
-      const mins = Math.round((Date.now() - startedAt) / 60_000);
-      const yes = (b: unknown) => (b ? '✅' : '❌');
-      return [
-        `<b>Status</b> · up ${mins >= 60 ? `${(mins / 60).toFixed(1)}h` : `${mins}m`}`,
-        `${yes(ws?.connected)} Live pump.fun stream${onchain ? ` (${onchain.stats.pumpEvents} events)` : ' (off)'}`,
-        `${yes(env.GMGN_API_KEY)} GMGN · ${yes(env.JUPITER_API_KEY)} Jupiter key · ${yes(env.ENABLE_RUGCHECK)} RugCheck`,
-        `${yes(evaluator!.sol.usd)} SOL price ${evaluator!.sol.usd ? `$${evaluator!.sol.usd.toFixed(0)}` : 'n/a'}`,
-        `Watching <b>${registry.tokens.size}</b> tokens · deep-checked ${st.deepChecks} · rejected ${st.rejected}`,
-        `Top reject reasons: ${evaluator!.topRejectReasons() || 'none yet'}`,
-        `Signals sent <b>${st.signals}</b> · open ${positions!.openCount} · learning from ${positions!.shadowCount} silent near-misses`,
-      ].join('\n');
-    };
+    const status = () =>
+      formatStatus({
+        uptimeMs: Date.now() - startedAt,
+        streamOn: !!onchain,
+        lastEventAgoSec: onchain?.stats.lastEventAt ? (Date.now() - onchain.stats.lastEventAt) / 1000 : null,
+        events: onchain?.stats.pumpEvents ?? 0,
+        gmgn: !!env.GMGN_API_KEY,
+        jupiter: !!env.JUPITER_API_KEY,
+        rugcheck: env.ENABLE_RUGCHECK,
+        solUsd: evaluator!.sol.usd,
+        watching: registry.tokens.size,
+        deepChecked: evaluator!.stats.deepChecks,
+        rejected: evaluator!.stats.rejected,
+        reasons: [...evaluator!.rejectReasons].sort((a, b) => b[1] - a[1]).slice(0, 5),
+        sent: evaluator!.stats.signals,
+        open: positions!.openCount,
+        learning: positions!.shadowCount,
+      });
     const alerts = new AlertService(bus, log, {
       telegram: tg,
       discord: env.DISCORD_WEBHOOK_URL ? { http: new HttpClient(new TokenBucket(0.4, 2)), webhookUrl: env.DISCORD_WEBHOOK_URL } : undefined,
