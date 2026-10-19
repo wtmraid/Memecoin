@@ -5,7 +5,7 @@ import { extractMints } from '../ingest/social/extract.js';
 import type { Evaluator } from '../strategy/evaluator.js';
 import type { PositionMonitor } from '../strategy/positions.js';
 import { formatScan, toPlain } from './format.js';
-import { compactScan, compactSignal, compactUpdate } from './compact.js';
+import { compactRadar, compactScan, compactSignal, compactUpdate } from './compact.js';
 import type { TelegramBot } from './telegram.js';
 
 /**
@@ -15,6 +15,9 @@ import type { TelegramBot } from './telegram.js';
  */
 export class AlertService {
   private threads = new Map<string, number>(); // signalId → telegram message_id
+  private called = new Set<string>();
+  private radarTimes: number[] = [];
+  radarOn: boolean;
   sent = 0;
 
   constructor(
@@ -28,10 +31,23 @@ export class AlertService {
       /** Text for /status. */
       status?: () => string;
       minScore: number;
+      radar?: { enabled: boolean; minScore: number; maxPerHour: number };
     },
+    private now: () => number = Date.now,
   ) {
+    this.radarOn = opts.radar?.enabled ?? false;
+    bus.on('signal.radar', (r) => {
+      const cfg = this.opts.radar;
+      if (!cfg || !this.radarOn || r.score.score < cfg.minScore || this.called.has(r.mint)) return;
+      const hourAgo = this.now() - 3600_000;
+      this.radarTimes = this.radarTimes.filter((t) => t > hourAgo);
+      if (this.radarTimes.length >= cfg.maxPerHour) return; // never flood the chat
+      this.radarTimes.push(this.now());
+      void this.post(compactRadar(r), r.mint);
+    });
     bus.on('signal.buy', (s) => {
       if (s.score.score < opts.minScore) return;
+      this.called.add(s.mint);
       const html = compactSignal(s);
       void this.post(html, s.mint).then((id) => id && this.threads.set(s.id, id));
     });
@@ -73,6 +89,12 @@ export class AlertService {
         void tg.bot.send(chatId, this.opts.status?.() ?? 'running', { replyTo: msgId });
         return;
       }
+      if (/^\/radar\b/.test(t)) {
+        const arg = t.split(/\s+/)[1]?.toLowerCase();
+        if (arg === 'on' || arg === 'off') this.radarOn = arg === 'on';
+        void tg.bot.send(chatId, this.radarOn ? '👀 Radar is <b>ON</b> — early heads-ups for safe coins gaining buyers (max ' + (this.opts.radar?.maxPerHour ?? 0) + '/hour).\n<code>/radar off</code> to mute.' : '🔕 Radar is <b>OFF</b> — you only get 🚨 NEW CALLs.\n<code>/radar on</code> to turn it back on.', { replyTo: msgId });
+        return;
+      }
       if (/^\/open\b/.test(t)) {
         const lines = this.opts.positions?.openSummary() ?? [];
         void tg.bot.send(chatId, lines.length ? lines.join('\n') : 'No open signals.', { replyTo: msgId });
@@ -97,6 +119,7 @@ export const HELP = [
   '• <code>/full CA</code> → every metric (bundlers, clusters, dev…)',
   '• <code>/status</code> → is the bot healthy, what it is watching',
   '• <code>/open</code> → signals being tracked (sell updates arrive as replies to each alert)',
+  '• <code>/radar on|off</code> → 👀 early heads-ups for safe coins gaining buyers',
   '',
   '<i>Rule-based signals, not financial advice.</i>',
 ].join('\n');

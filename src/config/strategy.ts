@@ -185,5 +185,10 @@ export type StrategySettings = z.infer<typeof StrategySchema>;
 
 export const AlertsSchema = z.object({
   minScore: z.number().default(65),
+  /** 👀 RADAR: heads-up for coins that passed every safety check and are gaining buyers, before they're a buy. */
+  radar: z.boolean().default(true),
+  radarMinScore: z.number().default(45),
+  /** Hard cap so radar can never flood the chat. */
+  radarMaxPerHour: z.number().int().default(6),
 });
 export type AlertSettings = z.infer<typeof AlertsSchema>;

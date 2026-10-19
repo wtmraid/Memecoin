@@ -180,3 +180,19 @@ export function formatStatus(d: StatusData): string {
     `🧠 Learning from ${d.learning} near-misses`,
   ].join('\n');
 }
+
+export function compactRadar(r: import('../strategy/types.js').RadarPing): string {
+  const sym = esc(r.facts.symbol ?? '???');
+  const why = r.stage === 'building' ? '🕒 Still early — waiting for more buyers' : '⚠️ Momentum not strong enough for a call yet';
+  return [
+    `👀 <b>RADAR — $${sym}</b>`,
+    `Safe so far · not a buy yet · ⭐ ${r.score.score}/100`,
+    '',
+    ...statLines(r),
+    '🛡 Passed all safety checks',
+    why,
+    '',
+    `<code>${r.mint}</code>`,
+    `<i>You'll get 🚨 NEW CALL if it qualifies · /radar off to mute</i>`,
+  ].join('\n');
+}

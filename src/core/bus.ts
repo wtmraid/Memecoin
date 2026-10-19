@@ -11,7 +11,7 @@ import type {
   HolderStats,
   BondingCurveState,
 } from './types.js';
-import type { Signal, SignalUpdate } from '../strategy/types.js';
+import type { RadarPing, Signal, SignalUpdate } from '../strategy/types.js';
 
 export interface BusEvents {
   'token.created': TokenCreated;
@@ -32,6 +32,8 @@ export interface BusEvents {
   'signal.update': SignalUpdate;
   /** Silent paper-tracking of near-misses / sampled rejects (for the tuner). */
   'signal.shadow': Signal;
+  /** 👀 RADAR heads-up (safe so far, gaining buyers, not a buy yet). */
+  'signal.radar': RadarPing;
 }
 
 type Handler<T> = (payload: T) => void;

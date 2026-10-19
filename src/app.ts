@@ -291,6 +291,7 @@ export async function startApp(cfg: AppConfig, log: Logger): Promise<App> {
       positions,
       status,
       minScore: settings.alerts.minScore,
+      radar: { enabled: settings.alerts.radar, minScore: settings.alerts.radarMinScore, maxPerHour: settings.alerts.radarMaxPerHour },
     });
     alerts.startCommands();
     alerts.announce(`✅ <b>Scanner online</b>\n${HELP}`);

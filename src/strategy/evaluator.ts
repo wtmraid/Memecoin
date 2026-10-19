@@ -15,7 +15,7 @@ import type { RugcheckClient, RugcheckSummary } from '../safety/rugcheck.js';
 import { checkSocials, SocialIndex, type SocialLinks } from '../safety/socials.js';
 import { scoreToken } from '../scoring/score.js';
 import { buildPlan, decideMode } from './plan.js';
-import type { Evaluation, Signal } from './types.js';
+import type { Evaluation, RadarPing, Signal } from './types.js';
 import { WSOL_MINT } from '../ingest/onchain/programs.js';
 import type { ClusterReport } from '../safety/clusters.js';
 
@@ -84,6 +84,7 @@ export class Evaluator {
   private clusterCache = new TtlCache<ClusterReport | null>(120_000);
   private prewarmed = new Map<string, number>();
   private shadowed = new Set<string>();
+  private radared = new Set<string>();
   private signaled = new Map<string, number>();
   private rejectedUntil = new Map<string, number>();
   private permanent = new Set<string>();
@@ -445,7 +446,11 @@ export class Evaluator {
     try {
       const deep = await this.deepCache.get(mint, () => this.loadDeep(mint, false));
       const pre = runFilters(this.withSellSimPlaceholder(this.buildFacts(mint, deep)), this.s.filters);
-      if (pre.passed) await this.loadDeep(mint, true, deep); // warms the sell-test cache too
+      if (pre.passed) {
+        const full = await this.loadDeep(mint, true, deep); // warms the sell-test cache too
+        const ev = this.judge(this.buildFacts(mint, full));
+        if (ev.filters.passed) this.radar(ev, 'building');
+      }
     } catch (err) {
       this.warn('prewarm', mint, err);
     } finally {
@@ -478,6 +483,7 @@ export class Evaluator {
         // Near-miss: safe, qualified, but scored a bit low. Track it silently so the tuner
         // can tell whether the score bar is set too high or too low.
         if (ev.mode && ev.score.score >= minScore - this.s.strategy.shadowScoreBelow) this.shadow(ev, []);
+        this.radar(ev, 'near');
         return;
       }
       if (!ev.mode || !ev.plan) return;
@@ -490,6 +496,13 @@ export class Evaluator {
     } finally {
       this.inflight.delete(mint);
     }
+  }
+
+  /** One radar ping per coin, only when every safety check passed. Rate-limited in alerts. */
+  private radar(ev: Evaluation, stage: RadarPing['stage']) {
+    if (!ev.filters.passed || this.radared.has(ev.mint) || this.signaled.has(ev.mint)) return;
+    this.radared.add(ev.mint);
+    this.d.bus.emit('signal.radar', { ...ev, stage, ts: this.now() });
   }
 
   private shadow(ev: Evaluation, rejectIds: string[]) {

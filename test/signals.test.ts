@@ -407,3 +407,60 @@ describe('status card', () => {
     expect(formatStatus({ ...base, lastEventAgoSec: 900 })).toContain('❌ Live feed: no events for 15 min — check Helius credits');
   });
 });
+
+import { compactRadar } from '../src/alerts/compact.js';
+describe('👀 radar', () => {
+  it('a safe coin that is not yet a buy produces one radar ping (never for unsafe coins)', async () => {
+    const w = world({ info: cleanInfo, sec: cleanSec }, { scoring: { minScoreSnipe: 99 } });
+    const pings: unknown[] = [];
+    w.bus.on('signal.radar', (r) => pings.push(r));
+    w.launch();
+    await w.ev.tick();
+    await vi.waitFor(() => expect(pings).toHaveLength(1));
+    await w.ev.tick();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(pings).toHaveLength(1); // once per coin
+    const html = compactRadar(pings[0] as never);
+    if (process.env.PREVIEW) console.log('\n' + toPlain(html) + '\n');
+    expect(html).toMatch(/👀 <b>RADAR — \$REAL/);
+    expect(html).toMatch(/not a buy yet/);
+
+    const unsafe = world({ info, sec }, { scoring: { minScoreSnipe: 99 } }); // bundler 31.75%
+    const none: unknown[] = [];
+    unsafe.bus.on('signal.radar', (r) => none.push(r));
+    unsafe.launch();
+    await unsafe.ev.tick();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(none).toHaveLength(0);
+  });
+
+  it('alerts: capped per hour, mutable with /radar off, and skipped once a coin got a CALL', async () => {
+    const sent: any[] = [];
+    const http = new HttpClient(new TokenBucket(1000, 1000), async (_u, init) => {
+      sent.push(JSON.parse(String(init.body)));
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } }), { status: 200 });
+    });
+    const bus = new EventBus();
+    let t = 0;
+    const svc = new AlertService(bus, silent, { telegram: { bot: new TelegramBot(http, 'T', silent, 0), chatId: '1' }, minScore: 0, radar: { enabled: true, minScore: 40, maxPerHour: 2 } }, () => t);
+    const w = world({ info: cleanInfo, sec: cleanSec });
+    w.launch();
+    const ev = await w.ev.evaluate(MINT, { deep: true });
+    const ping = (mint: string, score = 60) => bus.emit('signal.radar', { ...ev, mint, score: { ...ev.score, score }, stage: 'building', ts: t });
+    ping('A');
+    ping('B');
+    ping('C'); // over the 2/hour cap
+    ping('D', 30); // below radar min score
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    t = 3600_001;
+    svc.radarOn = false;
+    ping('E');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sent).toHaveLength(2);
+    svc.radarOn = true;
+    bus.emit('signal.buy', { ...ev, mint: 'F', mode: 'SNIPE', plan: ev.plan!, id: 'x', ts: t });
+    ping('F'); // already called → no radar
+    await vi.waitFor(() => expect(sent).toHaveLength(3)); // only the CALL
+    expect(sent[2].text).toMatch(/NEW CALL/);
+  });
+});

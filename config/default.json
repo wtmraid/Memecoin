@@ -163,6 +163,9 @@
     ]
   },
   "alerts": {
-    "minScore": 65
+    "minScore": 65,
+    "radar": true,
+    "radarMinScore": 45,
+    "radarMaxPerHour": 6
   }
 }

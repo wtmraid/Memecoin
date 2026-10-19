@@ -18,6 +18,12 @@ export interface Evaluation {
   verdict: string;
 }
 
+/** Early heads-up: safe so far and building, but not (yet) a buy. */
+export interface RadarPing extends Evaluation {
+  stage: 'building' | 'near';
+  ts: number;
+}
+
 export interface Signal extends Evaluation {
   id: string;
   mode: Mode;
