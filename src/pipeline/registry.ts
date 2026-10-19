@@ -25,6 +25,8 @@ export interface RegistryDeps {
   marketSnapshots(mints: string[]): Promise<Map<string, MarketSnapshot>>;
   holderStats?(mint: string): Promise<HolderStats>;
   bondingCurve?(mint: string): Promise<BondingCurveState | null>;
+  /** Only spend RPC credits on holder snapshots for tokens this returns true for. */
+  needsHolders?(t: TrackedToken): boolean;
 }
 
 export interface RegistryOptions {
@@ -170,6 +172,7 @@ export class TokenRegistry {
     try {
       const due = this.prioritized()
         .filter((t) => this.now() - t.lastHoldersAt >= this.opts.holdersRefreshSec * 1000)
+        .filter((t) => this.deps.needsHolders?.(t) ?? true)
         .slice(0, this.opts.holdersPerCycle);
       for (const t of due) {
         t.lastHoldersAt = this.now();
@@ -191,8 +194,13 @@ export class TokenRegistry {
     if (this.busy.curve || !this.deps.bondingCurve) return;
     this.busy.curve = true;
     try {
+      // Dead coins (no activity for 2 min) aren't worth a credit.
       const due = this.prioritized().filter(
-        (t) => t.onCurve && !t.complete && this.now() - t.lastCurveAt >= this.opts.curveRefreshSec * 1000,
+        (t) =>
+          t.onCurve &&
+          !t.complete &&
+          this.now() - t.lastActivity < 120_000 &&
+          this.now() - t.lastCurveAt >= this.opts.curveRefreshSec * 1000,
       );
       for (const t of due.slice(0, 20)) {
         t.lastCurveAt = this.now();

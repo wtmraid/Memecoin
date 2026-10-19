@@ -51,7 +51,7 @@ computer for any of these steps.
 | Never got "Scanner online" | Check `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALERT_CHAT_ID`, then look at Railway logs |
 | `/status` shows ❌ Live pump.fun stream | Wrong `HELIUS_API_KEY`, or Helius credits used up (Helius dashboard) |
 | Scans show `n/a` for Bundler/Insiders/Rug | `GMGN_API_KEY` missing or wrong. GMGN only accepts IPv4 traffic |
-| Helius credits run out fast | Set `ENABLE_PUMPFUN_TRADES=false` (loses SNIPE momentum data), or move to the Developer plan ($49) |
+| Helius credits run out fast | The live pump.fun stream alone needs more than the free 1M credits/month. Move to the Developer plan ($49/mo, 10M credits) — `ENABLE_PUMPFUN_TRADES=false` does **not** reduce usage |
 
 ## Any other server (VPS)
 ```bash

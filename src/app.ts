@@ -78,7 +78,10 @@ export async function startApp(cfg: AppConfig, log: Logger): Promise<App> {
       holderStats: rpc
         ? (mint) => fetchHolderStats(rpc, mint, { maxPages: s.holderCountMaxPages, useDas: isHelius })
         : undefined,
-      bondingCurve: rpc
+      // Credit budget: pump.fun curve coins get holders and curve state free from the live
+      // trade feed, so RPC holder snapshots are only for DEX-traded coins with real liquidity.
+      needsHolders: (t) => !t.onCurve && (t.market?.liquidityUsd ?? 0) >= settings.filters.minLiquidityUsd,
+      bondingCurve: rpc && !env.ENABLE_PUMPFUN_TRADES
         ? async (mint) => {
             const data = await rpc.getAccountData(bondingCurvePda(mint, programs.pumpfun));
             return data ? decodeBondingCurve(mint, data) : null;

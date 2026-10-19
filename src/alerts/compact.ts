@@ -158,7 +158,9 @@ export function formatStatus(d: StatusData): string {
   const feed = !d.streamOn
     ? '⚪ Live feed: off'
     : ago === null
-      ? '🟡 Live feed: connecting…'
+      ? d.uptimeMs > 120_000
+        ? '❌ Live feed: can\'t connect — Helius credits used up or wrong key'
+        : '🟡 Live feed: connecting…'
       : ago < 60
         ? `✅ Live feed: working (last event ${Math.round(ago)}s ago)`
         : `❌ Live feed: no events for ${Math.round(ago / 60)} min — check Helius credits`;

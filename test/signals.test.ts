@@ -464,3 +464,25 @@ describe('👀 radar', () => {
     expect(sent[2].text).toMatch(/NEW CALL/);
   });
 });
+
+describe('credit budget', () => {
+  it('status says the feed cannot connect after 2 minutes with no events', () => {
+    const t = formatStatus({ uptimeMs: 180_000, streamOn: true, lastEventAgoSec: null, events: 0, gmgn: false, jupiter: true, rugcheck: true, solUsd: 105, watching: 101, deepChecked: 0, rejected: 0, reasons: [], sent: 0, open: 0, learning: 0 });
+    expect(t).toMatch(/can't connect — Helius credits used up or wrong key/);
+  });
+
+  it('holder snapshots (RPC credits) only for tokens that need them; dead curve coins are not polled', async () => {
+    let now = 1_000_000;
+    const bus = new EventBus();
+    const holders = vi.fn(async (mint: string) => ({ mint, supply: 1n, decimals: 6, top: [], holderCount: 1, holderCountIsLowerBound: false, ts: now }));
+    const curve = vi.fn(async () => null);
+    const reg = new TokenRegistry(bus, { marketSnapshots: async () => new Map(), holderStats: holders, bondingCurve: curve, needsHolders: (t) => !t.onCurve }, silent, { ...regOpts, holdersRefreshSec: 1, curveRefreshSec: 1 }, () => now);
+    reg.track('curve', { onCurve: true });
+    reg.track('dex', {});
+    await reg.refreshHolders();
+    expect(holders.mock.calls.map((c) => c[0])).toEqual(['dex']);
+    now += 5 * 60_000; // curve coin went quiet
+    await reg.refreshCurves();
+    expect(curve).not.toHaveBeenCalled();
+  });
+});
